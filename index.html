@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <!-- viewport-fit=cover lets the layout paint under the notch/home indicator;
+         the safe-area insets in theme.js keep content clear of both. -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#0A0A0A" />
+    <meta name="description" content="Personal Ledger — track income, expenses, budgets and loans." />
+    <title>Personal Ledger</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Anton&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
+    />
+    <style>
+      /* Painted before JS runs so there's no white flash on load.
+         The full token set is installed by applyTheme() in theme.js. */
+      html, body, #root { height: 100%; margin: 0; }
+      body {
+        background: #0A0A0A;
+        color: #F5F5F0;
+        /* Stop iOS from inflating type when the phone is turned sideways. */
+        -webkit-text-size-adjust: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
