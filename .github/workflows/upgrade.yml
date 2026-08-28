@@ -1,0 +1,64 @@
+name: upgrade
+
+# The manual-merge path: something landed on `upgrade` by hand rather than by
+# automatic promotion — the migration PR that promote.yml held back, or a
+# conflict-resolution PR. Build it and carry it the rest of the way to main.
+#
+# This does NOT double-fire after promote.yml pushes to upgrade: pushes made with
+# GITHUB_TOKEN do not trigger workflow runs.
+on:
+  push:
+    branches: [upgrade]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# Same group as promote.yml — the two must never touch main at once.
+concurrency:
+  group: promote
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      # No migration guard here. Merging into upgrade by hand IS the signal that
+      # the SQL has already been run in Supabase.
+      - name: Fast-forward main
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git switch -C upgrade origin/upgrade
+          git switch -C main origin/main
+          git merge --ff-only upgrade
+          git push origin main
+
+      - name: Back-merge main into the working branches
+        run: |
+          for b in bug-fix features; do
+            git ls-remote --exit-code --heads origin "$b" >/dev/null 2>&1 || continue
+            git switch -C "$b" "origin/$b"
+            if git merge main -m "sync: main into $b"; then
+              git push origin "$b"
+            else
+              git merge --abort
+              echo "::warning::Back-merge into $b conflicted — run 'git pull' and resolve locally."
+            fi
+          done

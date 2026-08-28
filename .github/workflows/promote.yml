@@ -1,0 +1,151 @@
+name: promote
+
+# bug-fix / features --> upgrade --> main, automatically, when the build is green.
+#
+# The whole chain runs in ONE job on purpose. Pushes made with GITHUB_TOKEN do not
+# trigger further workflow runs, so a design where "merge into upgrade" wakes a
+# separate upgrade workflow would stall silently. Doing it all here sidesteps that.
+on:
+  push:
+    branches: [bug-fix, features]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+# bug-fix and features can land at the same time; serialise so they never race
+# for the same upgrade/main refs. Never cancel — a half-done promotion is worse
+# than a slow one.
+concurrency:
+  group: promote
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # merges need real history, not a shallow clone
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      # The only gate. VITE_SUPABASE_* are absent here and that is fine:
+      # src/lib/supabaseClient.js turns missing env vars into a configError
+      # string rather than throwing, so the build still compiles. Vercel does
+      # the real env-injected production build after main moves.
+      - name: Build
+        run: npm run build
+
+      # Migrations are applied by hand in the Supabase SQL editor. Shipping code
+      # that depends on unapplied SQL breaks production, so a changeset touching
+      # migrations/ stops here and waits for a human instead of auto-merging.
+      - name: Check for migrations
+        id: guard
+        run: |
+          files=$(git diff --name-only origin/main...HEAD -- migrations/ | grep '\.sql$' || true)
+          if [ -z "$files" ]; then
+            echo "held=false" >> "$GITHUB_OUTPUT"
+            echo "No migrations in this changeset — promoting automatically."
+          else
+            echo "held=true" >> "$GITHUB_OUTPUT"
+            {
+              echo "files<<EOF"
+              echo "$files"
+              echo "EOF"
+            } >> "$GITHUB_OUTPUT"
+            echo "Migrations found — holding for manual merge:"
+            echo "$files"
+          fi
+
+      - name: Open PR for the migration
+        if: steps.guard.outputs.held == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BRANCH: ${{ github.ref_name }}
+          FILES: ${{ steps.guard.outputs.files }}
+        run: |
+          existing=$(gh pr list --base upgrade --head "$BRANCH" --state open --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            echo "PR #$existing is already open for $BRANCH — nothing to do."
+            exit 0
+          fi
+          body=$(cat <<EOF
+          Automatic promotion is **held** because this changeset adds or edits migrations.
+
+          \`\`\`
+          $FILES
+          \`\`\`
+
+          Run them in the Supabase SQL editor **before** merging this PR.
+          Merging is the signal that the schema is already in place — \`upgrade.yml\`
+          will then build and fast-forward \`main\`, and Vercel will deploy.
+          EOF
+          )
+          gh pr create \
+            --base upgrade \
+            --head "$BRANCH" \
+            --title "Promote $BRANCH (contains migrations)" \
+            --body "$body"
+
+      - name: Merge into upgrade
+        id: merge
+        if: steps.guard.outputs.held == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git switch -C upgrade origin/upgrade
+          # Merge the exact commit that triggered this run, not origin/$BRANCH —
+          # a newer push must not be dragged in without its own build.
+          if git merge --no-ff "$GITHUB_SHA" -m "promote: $BRANCH into upgrade"; then
+            git push origin upgrade
+            echo "merged=true" >> "$GITHUB_OUTPUT"
+          else
+            git merge --abort
+            echo "merged=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::$BRANCH conflicts with upgrade — opening a PR instead."
+            existing=$(gh pr list --base upgrade --head "$BRANCH" --state open --json number --jq '.[0].number // empty')
+            if [ -z "$existing" ]; then
+              gh pr create --base upgrade --head "$BRANCH" \
+                --title "Promote $BRANCH (conflicts with upgrade)" \
+                --body "Automatic promotion stopped: this branch does not merge cleanly into \`upgrade\`. Resolve the conflict here and merge."
+            fi
+          fi
+
+      # upgrade is the only thing that ever lands on main, so this is always a
+      # fast-forward. If it isn't, something was pushed to main directly and the
+      # run should fail loudly rather than paper over it with a merge commit.
+      - name: Fast-forward main
+        if: steps.merge.outputs.merged == 'true'
+        run: |
+          git switch -C main origin/main
+          git merge --ff-only upgrade
+          git push origin main
+
+      # Keep the long-lived branches level with main so they never drift into a
+      # pile of conflicts. This is what `git pull --rebase` in the fix/feat
+      # aliases absorbs on your next commit.
+      - name: Back-merge main into the working branches
+        if: steps.merge.outputs.merged == 'true'
+        run: |
+          for b in bug-fix features; do
+            git ls-remote --exit-code --heads origin "$b" >/dev/null 2>&1 || continue
+            git switch -C "$b" "origin/$b"
+            if git merge main -m "sync: main into $b"; then
+              git push origin "$b"
+            else
+              git merge --abort
+              echo "::warning::Back-merge into $b conflicted — run 'git pull' and resolve locally."
+            fi
+          done

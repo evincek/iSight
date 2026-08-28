@@ -47,6 +47,65 @@ the env vars aren't reaching it — check `.env` exists and restart the dev serv
 
 ---
 
+## 4. Branching and deploys
+
+Two commands. Minor fixes go to `bug-fix`, new work goes to `features`:
+
+```bash
+git fix  "category names are case-insensitive"
+git feat "csv export for the register"
+```
+
+Each one switches to (or creates) the branch, stages everything, commits, pulls
+whatever the pipeline sent back down, and pushes. Nothing gets committed to `main`
+by hand.
+
+From there GitHub Actions carries the change the rest of the way:
+
+```
+git fix / git feat
+      │
+      ▼
+  bug-fix ──┐
+            ├──▶ upgrade ──▶ main ──▶ Vercel deploys
+  features ─┘
+```
+
+[`.github/workflows/promote.yml`](.github/workflows/promote.yml) runs `npm run build`
+on the push. **If the build is green the change is merged into `upgrade` and
+fast-forwarded onto `main` with no further input** — `upgrade` is where a fix and a
+feature meet before either reaches production, and both branches are back-merged
+from `main` afterwards so they never drift.
+
+Two things stop the automatic promotion, and both hand you a pull request instead:
+
+- **The changeset touches `migrations/`.** Migrations are run by hand in the
+  Supabase SQL editor, and code that depends on unapplied SQL breaks production —
+  the same rule as [Pushing updates](#pushing-updates-without-touching-your-data)
+  below. Run the SQL first, then merge the PR;
+  [`upgrade.yml`](.github/workflows/upgrade.yml) takes it to `main` from there.
+- **The branch conflicts with `upgrade`.** Resolve it in the PR and merge.
+
+Note that a green build is the *only* automatic gate, and it catches a broken
+import, not a wrong number. Anything you want reviewed, review before you push.
+
+### First-time setup
+
+The aliases are local git config, so they're set per clone:
+
+```bash
+git config --local alias.fix  '!f() { b=bug-fix;  git switch "$b" 2>/dev/null || git switch -c "$b" || return 1; git add -A || return 1; git commit -m "$1" || return 1; if git ls-remote --exit-code --heads origin "$b" >/dev/null 2>&1; then git pull --rebase --autostash origin "$b" || return 1; fi; git push -u origin "$b"; }; f'
+git config --local alias.feat '!f() { b=features; git switch "$b" 2>/dev/null || git switch -c "$b" || return 1; git add -A || return 1; git commit -m "$1" || return 1; if git ls-remote --exit-code --heads origin "$b" >/dev/null 2>&1; then git pull --rebase --autostash origin "$b" || return 1; fi; git push -u origin "$b"; }; f'
+```
+
+On the GitHub side, under **Settings → Actions → General**, set workflow
+permissions to **Read and write** and allow Actions to create pull requests.
+Leave `main` unprotected: required reviews reject the bot's push and deadlock the
+promotion. In Vercel, the production branch is `main` — `upgrade`, `bug-fix`, and
+`features` get preview deploys, which is what you test against.
+
+---
+
 ## Pushing updates without touching your data
 
 **Deploys cannot wipe your database.** The frontend is a static build — Vercel
@@ -63,7 +122,10 @@ yourself. The rules that prevent that are in
 - Adding a column? Give it a default or allow nulls.
 
 Schema changes are a separate, deliberate act from deploying code. Run the new
-migration in the SQL editor, then push the code that uses it.
+migration in the SQL editor, then push the code that uses it. The pipeline
+enforces this: a push that adds or edits anything in `migrations/` is held back
+from `main` and opened as a pull request instead — see
+[Branching and deploys](#4-branching-and-deploys) above.
 
 ---
 
