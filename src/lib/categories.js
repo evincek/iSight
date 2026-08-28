@@ -10,8 +10,10 @@
 export const normalizeCategory = (name) => (name || "").trim().replace(/\s+/g, " ");
 
 /**
- * What gets matched on. Mirrors the `lower(name)` unique index from migration
- * 005, so the app agrees with the database about which names are the same one.
+ * What gets matched on. Migration 006 indexes `categories` on a SQL
+ * `category_key()` with this exact definition, so the database rejects a second
+ * spelling on the same terms the app folds them on — the two cannot drift into
+ * disagreeing about which names are one category.
  */
 export const categoryKey = (name) => normalizeCategory(name).toLowerCase();
 

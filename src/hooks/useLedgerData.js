@@ -18,7 +18,7 @@ export const DEFAULT_CATEGORIES = [
  * Category names are free text, so two names that differ only in spacing or
  * case are the same category as far as a person is concerned. `normalizeCategory`
  * is what gets stored; `sameCategory` is what decides "already exists" — it
- * mirrors the case-insensitive unique index added in migration 005. Both live
+ * mirrors the case-insensitive unique index added in migration 006. Both live
  * in lib/categories so the views match names the same way this file does.
  */
 export { normalizeCategory, sameCategory } from "../lib/categories";
