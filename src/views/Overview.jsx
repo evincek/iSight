@@ -6,12 +6,14 @@ import { tokens, display, label as labelStyle, numeral, body } from "../theme";
 import { chart, axisProps, gridProps, tooltipStyle, legendProps } from "../lib/chartTheme";
 import { fmtMoney, fmtCompact, monthLabel, shiftMonth } from "../lib/format";
 import * as A from "../lib/analytics";
+import { alignBudgets } from "../lib/categories";
 import { useIsNarrow } from "../hooks/useIsNarrow";
 import { Panel, Delta, Bar, Empty, ScrollX, AutoGrid } from "../components/primitives";
 
 export default function Overview({ data, month, onView }) {
   const narrow = useIsNarrow();
-  const { transactions, loans, loanEvents, budgets } = data;
+  const { transactions, loans, loanEvents, budgets, categories } = data;
+  const plan = useMemo(() => alignBudgets(budgets, categories), [budgets, categories]);
 
   const monthTx = useMemo(() => A.inMonth(transactions, month), [transactions, month]);
   const income = A.sumIncome(monthTx);
@@ -27,7 +29,7 @@ export default function Overview({ data, month, onView }) {
   const incomeChange = A.pctChange(income, prevIncome);
   const owed = useMemo(() => A.totalOutstanding(loans, loanEvents), [loans, loanEvents]);
 
-  const cats = useMemo(() => A.byCategory(monthTx), [monthTx]);
+  const cats = useMemo(() => A.byCategory(monthTx, categories), [monthTx, categories]);
   const catRows = useMemo(
     () => Object.entries(cats).sort((a, b) => b[1] - a[1]),
     [cats]
@@ -35,8 +37,8 @@ export default function Overview({ data, month, onView }) {
 
   const trend = useMemo(() => A.trendSeries(transactions, month, 6), [transactions, month]);
   const insights = useMemo(
-    () => A.buildInsights({ transactions, loans, loanEvents, budgets, key: month }),
-    [transactions, loans, loanEvents, budgets, month]
+    () => A.buildInsights({ transactions, loans, loanEvents, budgets, categories, key: month }),
+    [transactions, loans, loanEvents, budgets, categories, month]
   );
 
   const register = useMemo(
@@ -168,7 +170,7 @@ export default function Overview({ data, month, onView }) {
           ) : (
             <div style={{ display: "grid", gap: 12 }}>
               {catRows.slice(0, 7).map(([cat, amt]) => {
-                const budget = budgets[cat] || 0;
+                const budget = plan[cat] || 0;
                 const over = budget > 0 && amt > budget;
                 const pct = budget > 0 ? (amt / budget) * 100 : expenses > 0 ? (amt / expenses) * 100 : 0;
                 return (

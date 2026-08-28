@@ -7,6 +7,7 @@ import { tokens, display, label as labelStyle, numeral, body } from "../theme";
 import { chart, axisProps, gridProps, tooltipStyle, legendProps, MAX_SERIES } from "../lib/chartTheme";
 import { fmtMoney, fmtCompact, monthLabel, shiftMonth, daysInMonth, dayLabel } from "../lib/format";
 import * as A from "../lib/analytics";
+import { alignBudgets } from "../lib/categories";
 import { useIsNarrow } from "../hooks/useIsNarrow";
 import { Panel, StatTile, Delta, Bar, Empty, ScrollX, Select, AutoGrid } from "../components/primitives";
 
@@ -260,8 +261,12 @@ function Heatmap({ heat, month, dailyBudget }) {
  * ------------------------------------------------------------------ */
 export default function Analytics({ data, month }) {
   const narrow = useIsNarrow();
-  const { transactions, budgets } = data;
+  const { transactions, budgets, categories } = data;
   const [span, setSpan] = useState(6);
+
+  // One budget per category, keyed by the live spelling — case-variant rows
+  // fold together instead of both counting toward the plan.
+  const plan = useMemo(() => alignBudgets(budgets, categories), [budgets, categories]);
 
   // Charts reflow rather than scroll on a phone. Two consequences: the legend
   // wraps to a second line, so the box needs to be *taller* than on desktop
@@ -283,13 +288,13 @@ export default function Analytics({ data, month }) {
   );
   const avgs = useMemo(() => A.rollingAverages(transactions, month), [transactions, month]);
   const heat = useMemo(() => A.dailySpend(transactions, month), [transactions, month]);
-  const burn = useMemo(() => A.budgetBurn(transactions, budgets, month), [transactions, budgets, month]);
-  const fc = useMemo(() => A.forecast(transactions, month, budgets), [transactions, budgets, month]);
+  const burn = useMemo(() => A.budgetBurn(transactions, plan, month), [transactions, plan, month]);
+  const fc = useMemo(() => A.forecast(transactions, month, plan), [transactions, plan, month]);
   const recurring = useMemo(() => A.detectRecurring(transactions), [transactions]);
 
   const budgetTotal = useMemo(
-    () => Object.values(budgets).reduce((s, v) => s + (v || 0), 0),
-    [budgets]
+    () => Object.values(plan).reduce((s, v) => s + (v || 0), 0),
+    [plan]
   );
   const curve = useMemo(
     () => A.burnCurve(transactions, month, budgetTotal),
@@ -349,10 +354,11 @@ export default function Analytics({ data, month }) {
           value={budgetTotal > 0 ? fmtMoney(budgetTotal) : "—"}
           size={26}
           sub={
-            budgetTotal > 0 && fc.overBudgetBy !== null
+            budgetTotal > 0 && fc.overBudgetBy != null
               ? fc.overBudgetBy > 0
-                ? `On pace for ${fmtMoney(fc.overBudgetBy)} over`
-                : `${fmtMoney(Math.abs(fc.overBudgetBy))} of headroom`
+                // A finished month is a result, not a projection.
+                ? `${fc.complete ? "Finished" : "On pace for"} ${fmtMoney(fc.overBudgetBy)} over`
+                : `${fmtMoney(Math.abs(fc.overBudgetBy))} ${fc.complete ? "under" : "of headroom"}`
               : "Set budgets to track pace"
           }
         />
