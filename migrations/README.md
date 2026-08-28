@@ -9,6 +9,8 @@ Run these **in numerical order** in the Supabase SQL editor
 | `002_indexes.sql` | Indexes on the columns every query sorts by |
 | `003_feedback.sql` | Insert-only feedback table for testers |
 | `004_loan_terms.sql` | Loan interest + term columns, and `interest`/`penalty` event types |
+| `005_merge_category_case.sql` | Folds existing case-variant categories together (plan first, then apply) |
+| `006_category_case.sql` | Case-insensitive unique category names per user |
 
 ## The rules
 

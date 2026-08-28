@@ -3,6 +3,7 @@
 // in isolation and reused by both the Overview strip and the Analytics view.
 
 import { monthKey, shiftMonth, daysInMonth, elapsedDays, monthLabel, fmtMoney, addMonths, todayISO } from "./format";
+import { categoryKey, alignBudgets } from "./categories";
 
 /* ------------------------------------------------------------------ *
  * Basic slicing
@@ -29,11 +30,29 @@ export const pctChange = (curr, prev) => {
   return ((curr - prev) / prev) * 100;
 };
 
-/** Expense totals keyed by category (positive numbers). */
-export const byCategory = (tx) => {
+/**
+ * Expense totals keyed by category (positive numbers).
+ *
+ * Transactions carry the category name as text, so the same category can arrive
+ * under several spellings. Variants are summed into one bucket; pass `names`
+ * (the live category list) to have that bucket keyed by the canonical spelling,
+ * so callers can look spend up by the name they already hold. Without `names`,
+ * the first spelling seen wins — enough to keep one thing from drawing two
+ * slices in a breakdown.
+ */
+export const byCategory = (tx, names = []) => {
+  const label = new Map();
+  for (const name of names) label.set(categoryKey(name), name);
+
   const map = {};
   tx.filter((t) => t.amount < 0).forEach((t) => {
-    map[t.category] = (map[t.category] || 0) + Math.abs(t.amount);
+    const key = categoryKey(t.category);
+    let name = label.get(key);
+    if (name === undefined) {
+      name = t.category;
+      label.set(key, name);
+    }
+    map[name] = (map[name] || 0) + Math.abs(t.amount);
   });
   return map;
 };
@@ -211,7 +230,9 @@ export function budgetBurn(transactions, budgets, key, now = new Date()) {
   const elapsed = elapsedDays(key, now);
   const paceRatio = total > 0 ? elapsed / total : 0;
 
-  const spend = byCategory(inMonth(transactions, key));
+  // Key spend by the spelling the budgets use, so a transaction filed under a
+  // case-variant of the name still counts against its budget.
+  const spend = byCategory(inMonth(transactions, key), Object.keys(budgets));
 
   return Object.entries(budgets)
     .filter(([, amount]) => amount > 0)
@@ -359,13 +380,18 @@ export function forecast(transactions, key, budgets = {}, now = new Date()) {
   const spent = sumExpenses(monthTx);
 
   const budgetTotal = Object.values(budgets).reduce((s, v) => s + (v || 0), 0);
+  // Positive means over, negative means headroom. `null` — not `undefined` —
+  // when there is no plan to measure against: callers test it against null to
+  // decide whether to render a figure at all, and every return below has to
+  // carry it, or a finished month reads back as NaN of headroom.
+  const against = (projection) => (budgetTotal > 0 ? projection - budgetTotal : null);
 
   // A past or not-yet-started month needs no projection.
   if (elapsed === 0) {
-    return { spent: 0, projected: 0, budgetTotal, complete: false, elapsed, total, basis: "none" };
+    return { spent: 0, projected: 0, budgetTotal, overBudgetBy: against(0), complete: false, elapsed, total, basis: "none" };
   }
   if (elapsed >= total) {
-    return { spent, projected: spent, budgetTotal, complete: true, elapsed, total, basis: "actual" };
+    return { spent, projected: spent, budgetTotal, overBudgetBy: against(spent), complete: true, elapsed, total, basis: "actual" };
   }
 
   const recurring = detectRecurring(transactions, now);
@@ -394,7 +420,7 @@ export function forecast(transactions, key, budgets = {}, now = new Date()) {
     recurringPaid,
     recurringDue,
     budgetTotal,
-    overBudgetBy: budgetTotal > 0 ? projected - budgetTotal : null,
+    overBudgetBy: against(projected),
     complete: false,
     elapsed,
     total,
@@ -502,7 +528,8 @@ export function withBalance(transactions, loanEvents, loans) {
  * Insight strip
  * ------------------------------------------------------------------ */
 
-export function buildInsights({ transactions, loans, loanEvents, budgets, key, now = new Date() }) {
+export function buildInsights({ transactions, loans, loanEvents, budgets, categories = [], key, now = new Date() }) {
+  const plan = alignBudgets(budgets, categories);
   const monthTx = inMonth(transactions, key);
   const income = sumIncome(monthTx);
   const expenses = sumExpenses(monthTx);
@@ -511,7 +538,7 @@ export function buildInsights({ transactions, loans, loanEvents, budgets, key, n
   const prevTx = inMonth(transactions, prevKey);
   const prevExpenses = sumExpenses(prevTx);
 
-  const cats = byCategory(monthTx);
+  const cats = byCategory(monthTx, Object.keys(plan));
   const owed = totalOutstanding(loans, loanEvents);
   const out = [];
 
@@ -546,12 +573,12 @@ export function buildInsights({ transactions, loans, loanEvents, budgets, key, n
       });
     }
 
-    const over = Object.entries(cats).filter(([c, amt]) => budgets[c] > 0 && amt > budgets[c]);
+    const over = Object.entries(cats).filter(([c, amt]) => plan[c] > 0 && amt > plan[c]);
     if (over.length > 0) {
       out.push({ tone: "bad", text: `Over budget in ${over.map(([c]) => c).join(", ")} this month.` });
     }
 
-    const fc = forecast(transactions, key, budgets, now);
+    const fc = forecast(transactions, key, plan, now);
     if (!fc.complete && fc.projected > 0 && fc.budgetTotal > 0) {
       out.push({
         tone: fc.projected > fc.budgetTotal ? "bad" : "good",

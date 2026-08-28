@@ -2,6 +2,7 @@ import React, { useState, useMemo } from "react";
 import { tokens, label as labelStyle, numeral, body } from "../theme";
 import { fmtMoney } from "../lib/format";
 import * as A from "../lib/analytics";
+import { alignBudgets, sameCategory } from "../lib/categories";
 import { Panel, Input, Button, Bar, Empty, AutoGrid } from "../components/primitives";
 
 /** Debounce so a budget edit doesn't fire an upsert on every keystroke. */
@@ -22,18 +23,27 @@ export default function Budgets({ data, month }) {
   const [newCategory, setNewCategory] = useState("");
   const debouncedSave = useDebouncedSave(setBudget);
 
-  const spend = useMemo(() => A.byCategory(A.inMonth(transactions, month)), [transactions, month]);
-  const rows = categories.filter((c) => c !== "Income");
+  const monthTx = useMemo(() => A.inMonth(transactions, month), [transactions, month]);
+  // Both maps get keyed by the live category spelling, so a transaction or a
+  // budget row filed under a case-variant still lines up with its row here.
+  const spend = useMemo(() => A.byCategory(monthTx, categories), [monthTx, categories]);
+  const plan = useMemo(() => alignBudgets(budgets, categories), [budgets, categories]);
+  const rows = categories.filter((c) => !sameCategory(c, "Income"));
 
-  const total = rows.reduce((s, c) => s + (budgets[c] || 0), 0);
-  const spent = rows.reduce((s, c) => s + (spend[c] || 0), 0);
+  const total = Object.entries(plan)
+    .filter(([c]) => !sameCategory(c, "Income"))
+    .reduce((s, [, amount]) => s + (amount || 0), 0);
+  // Every expense in the month, not just the ones whose category still has a
+  // row: spend under a deleted category is still spend, and leaving it out made
+  // "still unspent" claim money that was already gone.
+  const spent = A.sumExpenses(monthTx);
 
   const onChange = (cat, value) => {
     setDraft((d) => ({ ...d, [cat]: value }));
     debouncedSave(cat, value);
   };
 
-  const valueFor = (cat) => (draft[cat] !== undefined ? draft[cat] : budgets[cat] || "");
+  const valueFor = (cat) => (draft[cat] !== undefined ? draft[cat] : plan[cat] || "");
 
   const submitCategory = async (e) => {
     e.preventDefault();
@@ -54,7 +64,7 @@ export default function Budgets({ data, month }) {
           ) : (
             <div style={{ display: "grid", gap: 12 }}>
               {rows.map((cat) => {
-                const budget = budgets[cat] || 0;
+                const budget = plan[cat] || 0;
                 const used = spend[cat] || 0;
                 const over = budget > 0 && used > budget;
                 return (

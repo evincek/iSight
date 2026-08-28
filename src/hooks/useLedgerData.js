@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { supabase } from "../lib/supabaseClient";
+import { normalizeCategory, sameCategory } from "../lib/categories";
 
 export const DEFAULT_CATEGORIES = [
   "Housing",
@@ -12,6 +13,15 @@ export const DEFAULT_CATEGORIES = [
   "Income",
   "Other",
 ];
+
+/**
+ * Category names are free text, so two names that differ only in spacing or
+ * case are the same category as far as a person is concerned. `normalizeCategory`
+ * is what gets stored; `sameCategory` is what decides "already exists" — it
+ * mirrors the case-insensitive unique index added in migration 006. Both live
+ * in lib/categories so the views match names the same way this file does.
+ */
+export { normalizeCategory, sameCategory } from "../lib/categories";
 
 /**
  * Row shapers. Postgres hands numerics back as strings, and the views read
@@ -66,10 +76,21 @@ export function useLedgerData(userId) {
 
       let catNames = catRes.data.map((c) => c.name);
       if (catNames.length === 0) {
-        // First run for this user: seed default categories.
+        // First run for this user: seed default categories. Two loads can race
+        // here — StrictMode runs the effect twice, and a second tab seeds in
+        // parallel — so ignore rows another writer already inserted rather than
+        // letting a duplicate-key error abort the load and leave the list empty.
         const seedRows = DEFAULT_CATEGORIES.map((name) => ({ user_id: userId, name }));
-        const { data: seeded, error } = await supabase.from("categories").insert(seedRows).select();
+        const { error } = await supabase
+          .from("categories")
+          .upsert(seedRows, { onConflict: "user_id,name", ignoreDuplicates: true });
         if (error) throw error;
+        // Skipped rows come back empty, so re-read to get whatever actually landed.
+        const { data: seeded, error: rereadErr } = await supabase
+          .from("categories")
+          .select("*")
+          .order("created_at", { ascending: true });
+        if (rereadErr) throw rereadErr;
         catNames = seeded.map((c) => c.name);
       }
       setCategories(catNames);
@@ -137,20 +158,29 @@ export function useLedgerData(userId) {
 
   const addCategory = useCallback(
     async (name) => {
-      const clean = name.trim();
+      const clean = normalizeCategory(name);
       if (!clean) return false;
-      let duplicate = false;
+      // Compare case-insensitively so "food" doesn't sit next to "Food", but
+      // store the name as typed — "iPhone fund" shouldn't become "Iphone Fund".
+      let existing;
       setCategories((prev) => {
-        duplicate = prev.includes(clean);
+        existing = prev.find((c) => sameCategory(c, clean));
         return prev;
       });
-      if (duplicate) {
-        setErrorMsg(`"${clean}" already exists.`);
+      if (existing) {
+        setErrorMsg(`"${existing}" already exists.`);
         return false;
       }
       const { error } = await supabase.from("categories").insert({ user_id: userId, name: clean });
       if (error) {
-        setErrorMsg(error.message);
+        // 23505: the row exists in the database but not in local state. Say so
+        // in plain words and adopt it, instead of leaking the constraint name.
+        if (error.code === "23505") {
+          setErrorMsg(`"${clean}" already exists.`);
+          setCategories((prev) => (prev.some((c) => sameCategory(c, clean)) ? prev : [...prev, clean]));
+        } else {
+          setErrorMsg(error.message);
+        }
         return false;
       }
       setCategories((prev) => [...prev, clean]);

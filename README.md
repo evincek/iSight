@@ -49,7 +49,8 @@ the env vars aren't reaching it — check `.env` exists and restart the dev serv
 
 ## 4. Branching and deploys
 
-Two commands. Minor fixes go to `bug-fix`, new work goes to `features`:
+Full reference: **[WORKFLOW.md](WORKFLOW.md)**. The short version — two
+commands, minor fixes to `bug-fix`, new work to `features`:
 
 ```bash
 git fix  "category names are case-insensitive"
@@ -89,20 +90,12 @@ Two things stop the automatic promotion, and both hand you a pull request instea
 Note that a green build is the *only* automatic gate, and it catches a broken
 import, not a wrong number. Anything you want reviewed, review before you push.
 
-### First-time setup
+### Setting it up on a fresh clone
 
-The aliases are local git config, so they're set per clone:
-
-```bash
-git config --local alias.fix  '!f() { b=bug-fix;  git switch "$b" 2>/dev/null || git switch -c "$b" || return 1; git add -A || return 1; git commit -m "$1" || return 1; if git ls-remote --exit-code --heads origin "$b" >/dev/null 2>&1; then git pull --rebase --autostash origin "$b" || return 1; fi; git push -u origin "$b"; }; f'
-git config --local alias.feat '!f() { b=features; git switch "$b" 2>/dev/null || git switch -c "$b" || return 1; git add -A || return 1; git commit -m "$1" || return 1; if git ls-remote --exit-code --heads origin "$b" >/dev/null 2>&1; then git pull --rebase --autostash origin "$b" || return 1; fi; git push -u origin "$b"; }; f'
-```
-
-On the GitHub side, under **Settings → Actions → General**, set workflow
-permissions to **Read and write** and allow Actions to create pull requests.
-Leave `main` unprotected: required reviews reject the bot's push and deadlock the
-promotion. In Vercel, the production branch is `main` — `upgrade`, `bug-fix`, and
-`features` get preview deploys, which is what you test against.
+The `fix`/`feat` aliases are local git config, so they don't travel with the repo.
+The exact commands, plus the GitHub and Vercel settings this depends on, are in
+**[WORKFLOW.md](WORKFLOW.md)** — along with how to watch a run, how to finish a
+held migration, and what to do when something goes wrong.
 
 ---
 
