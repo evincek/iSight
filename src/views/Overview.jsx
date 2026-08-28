@@ -15,13 +15,22 @@ export default function Overview({ data, month, onView }) {
   const { transactions, loans, loanEvents, budgets, categories } = data;
   const plan = useMemo(() => alignBudgets(budgets, categories), [budgets, categories]);
 
-  const monthTx = useMemo(() => A.inMonth(transactions, month), [transactions, month]);
+  // Transactions plus loan repayments — money out is money out. Derived once so
+  // every figure below shares one value: a memo further down that still listed
+  // `transactions` in its deps would keep showing a stale total after a
+  // repayment was recorded on the Loans view.
+  const spendRows = useMemo(
+    () => A.spendingRows(transactions, loanEvents, loans),
+    [transactions, loanEvents, loans]
+  );
+
+  const monthTx = useMemo(() => A.inMonth(spendRows, month), [spendRows, month]);
   const income = A.sumIncome(monthTx);
   const expenses = A.sumExpenses(monthTx);
   const net = income - expenses;
 
   const prevKey = shiftMonth(month, -1);
-  const prevTx = useMemo(() => A.inMonth(transactions, prevKey), [transactions, prevKey]);
+  const prevTx = useMemo(() => A.inMonth(spendRows, prevKey), [spendRows, prevKey]);
   const prevExpenses = A.sumExpenses(prevTx);
   const prevIncome = A.sumIncome(prevTx);
 
@@ -35,7 +44,7 @@ export default function Overview({ data, month, onView }) {
     [cats]
   );
 
-  const trend = useMemo(() => A.trendSeries(transactions, month, 6), [transactions, month]);
+  const trend = useMemo(() => A.trendSeries(spendRows, month, 6), [spendRows, month]);
   const insights = useMemo(
     () => A.buildInsights({ transactions, loans, loanEvents, budgets, categories, key: month }),
     [transactions, loans, loanEvents, budgets, categories, month]
