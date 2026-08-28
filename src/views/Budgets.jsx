@@ -36,6 +36,12 @@ export default function Budgets({ data, month }) {
   // Every expense in the month, not just the ones whose category still has a
   // row: spend under a deleted category is still spend, and leaving it out made
   // "still unspent" claim money that was already gone.
+  //
+  // Transactions only, deliberately — this figure will read lower than the
+  // Overview's. Loan repayments count as expenses there (see `spendingRows` in
+  // lib/analytics), but a repayment has no budget line to spend against, so
+  // counting it here would report the plan as blown by money that was never
+  // planned. This is spend against plan, not everything that left the account.
   const spent = A.sumExpenses(monthTx);
 
   const onChange = (cat, value) => {

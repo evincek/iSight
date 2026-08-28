@@ -102,9 +102,12 @@ export default function Register({ data, month }) {
   };
 
   const totals = useMemo(() => {
-    const monthTx = A.inMonth(transactions, month);
+    // The same rows the register lists above, so "out" accounts for the loan
+    // repayments the user can see in the table — and agrees with the running
+    // balance beside them, which has always banked those rows.
+    const monthTx = A.inMonth(A.spendingRows(transactions, loanEvents, loans), month);
     return { income: A.sumIncome(monthTx), expenses: A.sumExpenses(monthTx) };
-  }, [transactions, month]);
+  }, [transactions, loanEvents, loans, month]);
 
   return (
     <div style={{ display: "grid", gap: 14 }}>

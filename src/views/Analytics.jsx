@@ -261,12 +261,22 @@ function Heatmap({ heat, month, dailyBudget }) {
  * ------------------------------------------------------------------ */
 export default function Analytics({ data, month }) {
   const narrow = useIsNarrow();
-  const { transactions, budgets, categories } = data;
+  const { transactions, loans, loanEvents, budgets, categories } = data;
   const [span, setSpan] = useState(6);
 
   // One budget per category, keyed by the live spelling — case-variant rows
   // fold together instead of both counting toward the plan.
   const plan = useMemo(() => alignBudgets(budgets, categories), [budgets, categories]);
+
+  // The split that decides which array each panel below reads. Anything
+  // answering "what did I spend" takes `spendRows`, so loan repayments count
+  // and the figures match the Overview. Anything answering "am I on plan" —
+  // forecast, budget burn, the burn curve, recurring detection — stays on raw
+  // transactions, because a repayment has no budget line to spend against.
+  const spendRows = useMemo(
+    () => A.spendingRows(transactions, loanEvents, loans),
+    [transactions, loanEvents, loans]
+  );
 
   // Charts reflow rather than scroll on a phone. Two consequences: the legend
   // wraps to a second line, so the box needs to be *taller* than on desktop
@@ -278,18 +288,31 @@ export default function Analytics({ data, month }) {
   const tickGap = narrow ? 16 : 5;
 
   const prevKey = shiftMonth(month, -1);
-  const cmp = useMemo(() => A.monthComparison(transactions, month, prevKey), [transactions, month, prevKey]);
+  const cmp = useMemo(() => A.monthComparison(spendRows, month, prevKey), [spendRows, month, prevKey]);
   const verdict = useMemo(() => A.comparisonVerdict(cmp, month, prevKey), [cmp, month, prevKey]);
 
-  const trend = useMemo(() => A.trendSeries(transactions, month, span), [transactions, month, span]);
+  const trend = useMemo(() => A.trendSeries(spendRows, month, span), [spendRows, month, span]);
   const ct = useMemo(
-    () => A.categoryTrends(transactions, month, span, MAX_SERIES),
-    [transactions, month, span]
+    () => A.categoryTrends(spendRows, month, span, MAX_SERIES),
+    [spendRows, month, span]
   );
-  const avgs = useMemo(() => A.rollingAverages(transactions, month), [transactions, month]);
-  const heat = useMemo(() => A.dailySpend(transactions, month), [transactions, month]);
+  // Moves with `trend` of necessity: rollingAverages is trendSeries' Expenses
+  // series averaged, and it's drawn as a reference line over that very chart.
+  const avgs = useMemo(() => A.rollingAverages(spendRows, month), [spendRows, month]);
+  const heat = useMemo(() => A.dailySpend(spendRows, month), [spendRows, month]);
   const burn = useMemo(() => A.budgetBurn(transactions, plan, month), [transactions, plan, month]);
   const fc = useMemo(() => A.forecast(transactions, month, plan), [transactions, plan, month]);
+
+  // The forecast tiles read lower than the comparison table above them in any
+  // month with a repayment, because they measure spend against plan. That's
+  // deliberate, but it looks like an error unless the tile says so.
+  const repaidThisMonth = useMemo(
+    () =>
+      A.inMonth(loanEvents, month)
+        .filter((e) => e.type === "repayment")
+        .reduce((s, e) => s + e.amount, 0),
+    [loanEvents, month]
+  );
   const recurring = useMemo(() => A.detectRecurring(transactions), [transactions]);
 
   const budgetTotal = useMemo(
@@ -337,7 +360,12 @@ export default function Analytics({ data, month }) {
 
       {/* ---- Forecast tiles ---- */}
       <AutoGrid min={180}>
-        <StatTile label="Spent so far" value={fmtMoney(fc.spent)} size={26} />
+        <StatTile
+          label="Spent so far"
+          value={fmtMoney(fc.spent)}
+          size={26}
+          sub={repaidThisMonth > 0 ? "excludes loan repayments" : undefined}
+        />
         <StatTile
           label={fc.complete ? "Month total" : "Projected total"}
           value={fmtMoney(fc.projected)}

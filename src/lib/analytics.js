@@ -2,8 +2,11 @@
 // plain arrays and returns plain data, so it can be reasoned about (and tested)
 // in isolation and reused by both the Overview strip and the Analytics view.
 
-import { monthKey, shiftMonth, daysInMonth, elapsedDays, monthLabel, fmtMoney, addMonths, todayISO } from "./format";
-import { categoryKey, alignBudgets } from "./categories";
+// Extensions are explicit so plain `node` can import this module too — Vite
+// resolves either spelling, but Node's ESM loader does no extension guessing,
+// and the tests in scripts/ run on bare node with no bundler.
+import { monthKey, shiftMonth, daysInMonth, elapsedDays, monthLabel, fmtMoney, addMonths, todayISO } from "./format.js";
+import { categoryKey, alignBudgets } from "./categories.js";
 
 /* ------------------------------------------------------------------ *
  * Basic slicing
@@ -488,6 +491,56 @@ export function loanSummary(loan, loanEvents, today = todayISO()) {
   };
 }
 
+/** Category filed against the cash side of a loan repayment. */
+export const LOAN_REPAYMENT_CATEGORY = "Loan repayment";
+
+/**
+ * Loan events as transaction-shaped rows: same fields, same sign convention, so
+ * anything that reads transactions can read these too.
+ *
+ * Only cash movements are projected. Interest and penalty events raise what's
+ * owed without any money changing hands, so they're reported on the Loans view
+ * instead of banked here.
+ *
+ * The repayment category is a synthetic name that isn't in the user's category
+ * list, so `alignBudgets` never gives it a budget and it can't trip an
+ * over-budget check. A user who creates a real category by that name folds the
+ * two into one bucket — the total stays right either way.
+ */
+export function loanCashRows(loanEvents = [], loans = []) {
+  return loanEvents
+    .filter((e) => e.type === "taken" || e.type === "repayment")
+    .map((e) => ({
+      id: e.id,
+      date: e.date,
+      description: `${e.type === "taken" ? "Loan received" : "Loan repayment"} — ${
+        (loans.find((l) => l.id === e.loanId) || {}).name || "Loan"
+      }`,
+      category: e.type === "taken" ? "Loan" : LOAN_REPAYMENT_CATEGORY,
+      amount: e.type === "taken" ? e.amount : -e.amount,
+      kind: "loan",
+    }));
+}
+
+/**
+ * The rows every spending aggregate should see: all transactions, plus loan
+ * repayments as negative rows. Paying a loan down moves money out of the
+ * account like any other expense, so it belongs in the totals that claim to say
+ * what the month cost.
+ *
+ * Income is untouched — only negative rows are appended, so
+ * `sumIncome(spendingRows(...)) === sumIncome(transactions)` always. Drawing a
+ * loan down is a liability, not earnings; it stays on the "Loans owed" line.
+ *
+ * Deliberately *not* for budget-facing figures. `forecast`, `budgetBurn`,
+ * `burnCurve`, `detectRecurring` and the Budgets view stay on raw transactions:
+ * a repayment has no budget line to spend against.
+ */
+export const spendingRows = (transactions, loanEvents = [], loans = []) => [
+  ...transactions,
+  ...loanCashRows(loanEvents, loans).filter((r) => r.amount < 0),
+];
+
 /**
  * Merges transactions and loan events into one date-sorted register with a
  * running balance. Loan events are synthetic read-only rows.
@@ -495,21 +548,7 @@ export function loanSummary(loan, loanEvents, today = todayISO()) {
 export function withBalance(transactions, loanEvents, loans) {
   const events = [
     ...transactions.map((t) => ({ ...t, kind: "transaction" })),
-    // Only cash movements belong in a running balance. Interest and penalty
-    // events raise what's owed without any money changing hands, so they're
-    // reported on the Loans view instead of banked here.
-    ...loanEvents
-      .filter((e) => e.type === "taken" || e.type === "repayment")
-      .map((e) => ({
-        id: e.id,
-        date: e.date,
-        description: `${e.type === "taken" ? "Loan received" : "Loan repayment"} — ${
-          (loans.find((l) => l.id === e.loanId) || {}).name || "Loan"
-        }`,
-        category: "Loan",
-        amount: e.type === "taken" ? e.amount : -e.amount,
-        kind: "loan",
-      })),
+    ...loanCashRows(loanEvents, loans),
   ].sort((a, b) => (a.date > b.date ? 1 : -1));
 
   let bal = 0;
@@ -530,12 +569,17 @@ export function withBalance(transactions, loanEvents, loans) {
 
 export function buildInsights({ transactions, loans, loanEvents, budgets, categories = [], key, now = new Date() }) {
   const plan = alignBudgets(budgets, categories);
-  const monthTx = inMonth(transactions, key);
+  // Loan repayments count as expenses; drawing a loan down does not count as
+  // income (it shows on the "Loans owed" line instead). Both months read from
+  // the same rows — comparing a month that counts repayments against a baseline
+  // that doesn't would report a phantom spike.
+  const rows = spendingRows(transactions, loanEvents, loans);
+  const monthTx = inMonth(rows, key);
   const income = sumIncome(monthTx);
   const expenses = sumExpenses(monthTx);
   const net = income - expenses;
   const prevKey = shiftMonth(key, -1);
-  const prevTx = inMonth(transactions, prevKey);
+  const prevTx = inMonth(rows, prevKey);
   const prevExpenses = sumExpenses(prevTx);
 
   const cats = byCategory(monthTx, Object.keys(plan));
@@ -573,11 +617,17 @@ export function buildInsights({ transactions, loans, loanEvents, budgets, catego
       });
     }
 
+    // `plan[c] > 0` is what keeps the synthetic "Loan repayment" bucket out of
+    // this: it never has a budget, and `undefined > 0` is false.
     const over = Object.entries(cats).filter(([c, amt]) => plan[c] > 0 && amt > plan[c]);
     if (over.length > 0) {
       out.push({ tone: "bad", text: `Over budget in ${over.map(([c]) => c).join(", ")} this month.` });
     }
 
+    // Raw `transactions` on purpose. `forecast` runs `detectRecurring`
+    // internally, and a fixed monthly repayment is a textbook match — folding
+    // repayments in would inflate the projection and fire "on pace to finish
+    // over budget" for money that was never budgeted in the first place.
     const fc = forecast(transactions, key, plan, now);
     if (!fc.complete && fc.projected > 0 && fc.budgetTotal > 0) {
       out.push({
