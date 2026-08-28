@@ -50,13 +50,26 @@ create schema if not exists ledger_migration;
 -- IMMUTABLE because 006 builds a unique index on `category_key`. Changing either
 -- body silently invalidates that index — redefine them only in a new migration
 -- that reindexes as well.
-create or replace function category_norm(name text) returns text
-  language sql immutable strict parallel safe as
-$$ select btrim(regexp_replace(name, '\s+', ' ', 'g')) $$;
+--
+-- Schema-qualified, and pinned with `set search_path = ''`, for two reasons.
+-- A SQL function body is stored as text and re-resolved every time it is
+-- planned, against whatever search_path the *caller* happens to have — so an
+-- unqualified `category_norm` inside `category_key` fails with "function
+-- category_norm(text) does not exist" the moment someone calls it from a
+-- session whose path does not include this schema. An expression index whose
+-- meaning depends on the caller's path is not really immutable, either. The SET
+-- clause also blocks inlining, which keeps the stored index expression and a
+-- query's `category_key(...)` as the same node, so the planner can match them.
+-- (pg_catalog is searched even under an empty path; qualified here anyway.)
+create or replace function public.category_norm(name text) returns text
+  language sql immutable strict parallel safe
+  set search_path = '' as
+$$ select pg_catalog.btrim(pg_catalog.regexp_replace(name, '\s+', ' ', 'g')) $$;
 
-create or replace function category_key(name text) returns text
-  language sql immutable strict parallel safe as
-$$ select lower(category_norm(name)) $$;
+create or replace function public.category_key(name text) returns text
+  language sql immutable strict parallel safe
+  set search_path = '' as
+$$ select pg_catalog.lower(public.category_norm(name)) $$;
 
 drop table if exists ledger_migration.category_merge_plan;
 
@@ -69,7 +82,7 @@ cat as (
     c.user_id,
     c.name,
     c.created_at,
-    category_norm(c.name) as norm
+    public.category_norm(c.name) as norm
   from categories c
 ),
 cat_keyed as (
@@ -111,7 +124,7 @@ seen_keyed as (
   select
     s.user_id,
     s.from_name,
-    category_key(s.from_name) as key
+    public.category_key(s.from_name) as key
   from seen s
 )
 select
@@ -264,9 +277,9 @@ commit;
 -- ==================================================================== --
 
 -- (a) No case-variant categories left.
-select user_id, category_key(name) as key, string_agg(quote_literal(name), ', ' order by name) as names
+select user_id, public.category_key(name) as key, string_agg(quote_literal(name), ', ' order by name) as names
   from categories
- group by user_id, category_key(name)
+ group by user_id, public.category_key(name)
 having count(*) > 1;
 
 -- (b) No transaction or budget still carrying a variant spelling of a live
@@ -276,7 +289,7 @@ select 'transaction' as found_in, t.user_id, t.category
  where exists (
    select 1 from categories c
     where c.user_id = t.user_id
-      and category_key(c.name) = category_key(t.category)
+      and public.category_key(c.name) = public.category_key(t.category)
       and c.name <> t.category
  )
 union all
@@ -285,7 +298,7 @@ select 'budget', b.user_id, b.category
  where exists (
    select 1 from categories c
     where c.user_id = b.user_id
-      and category_key(c.name) = category_key(b.category)
+      and public.category_key(c.name) = public.category_key(b.category)
       and c.name <> b.category
  );
 
