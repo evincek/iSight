@@ -1,0 +1,90 @@
+{
+  "name": "the cash and cost bases for loans",
+  "description": "A loan reads two ways, and mixing them is what makes figures stop adding up. Cost basis (what a month cost): interest and penalties count, repaying principal does not, drawing down is not income. Cash basis (what moved through the account): both legs of the principal count, interest that hasn't been paid counts for nothing. Figures are round so a wrong total is obvious rather than plausible.",
+  "ledger": {
+    "transactions": [
+      { "id": "t1", "date": "2026-08-01", "description": "Salary", "category": "Income", "amount": 3000 },
+      { "id": "t2", "date": "2026-08-03", "description": "Rent", "category": "Housing", "amount": -1000 },
+      { "id": "t3", "date": "2026-08-10", "description": "Groceries", "category": "Food", "amount": -200 }
+    ],
+    "loans": [
+      { "id": "L1", "name": "Kofi", "principal": 2000, "date": "2026-07-05", "interestAmount": 300, "durationMonths": null }
+    ],
+    "loanEvents": [
+      { "id": "e1", "loanId": "L1", "type": "taken", "amount": 2000, "date": "2026-07-05" },
+      { "id": "e2", "loanId": "L1", "type": "interest", "amount": 300, "date": "2026-08-05" },
+      { "id": "e3", "loanId": "L1", "type": "repayment", "amount": 500, "date": "2026-08-20" },
+      { "id": "e4", "loanId": "L1", "type": "penalty", "amount": 50, "date": "2026-08-20" }
+    ],
+    "budgets": { "Housing": 900 },
+    "categories": ["Housing", "Food", "Income"]
+  },
+  "cases": [
+    { "as": "rows", "fn": "costRows", "args": [{ "$ref": "transactions" }, { "$ref": "loanEvents" }, { "$ref": "loans" }] },
+    { "as": "aug", "fn": "inMonth", "args": [{ "$ref": "rows" }, "2026-08"] },
+    { "as": "jul", "fn": "inMonth", "args": [{ "$ref": "rows" }, "2026-07"] },
+
+    { "name": "interest and penalties are the cost of borrowing: 1000 + 200 + 300 + 50", "fn": "sumExpenses", "args": [{ "$ref": "aug" }], "expect": 1550 },
+    { "name": "repaying principal is not spending — it cancels a debt already banked", "fn": "sumExpenses", "args": [{ "$ref": "aug" }], "expect": 1550 },
+    { "name": "drawing a loan down is not income", "fn": "sumIncome", "args": [{ "$ref": "jul" }], "expect": 0 },
+    { "name": "nor is it an expense — the drawdown month is empty on this basis", "fn": "sumExpenses", "args": [{ "$ref": "jul" }], "expect": 0 },
+    { "name": "income is untouched by the projection", "fn": "sumIncome", "args": [{ "$ref": "aug" }], "expect": 3000 },
+
+    { "name": "category rows sum to the expenses headline", "fn": "byCategory", "args": [{ "$ref": "aug" }, ["Housing", "Food", "Income"]],
+      "expect": { "Housing": 1000, "Food": 200, "Loan interest": 350 } },
+
+    { "name": "borrowing neutrality: the same ledger without any loan costs 350 less, which is exactly the interest plus the penalty", "as": "bare",
+      "fn": "costRows", "args": [{ "$ref": "transactions" }] },
+    { "fn": "sumExpenses", "args": [{ "$ref": "bare" }], "expect": 1200 },
+    { "name": "the aggregates hold up with no loans at all", "fn": "costRows", "args": [{ "$ref": "transactions" }], "expect": [
+      { "id": "t1", "date": "2026-08-01", "description": "Salary", "category": "Income", "amount": 3000 },
+      { "id": "t2", "date": "2026-08-03", "description": "Rent", "category": "Housing", "amount": -1000 },
+      { "id": "t3", "date": "2026-08-10", "description": "Groceries", "category": "Food", "amount": -200 }
+    ] },
+
+    { "name": "the month-over-month baseline is on the same basis", "fn": "monthComparison", "args": [{ "$ref": "rows" }, "2026-08", "2026-07"], "path": "currTotal", "expect": 1550 },
+    { "fn": "monthComparison", "args": [{ "$ref": "rows" }, "2026-08", "2026-07"], "path": "rows[category=Loan interest].current", "expect": 350 },
+
+    { "name": "the trend series counts loan charges", "fn": "trendSeries", "args": [{ "$ref": "rows" }, "2026-08", 2], "path": "-1.Expenses", "expect": 1550 },
+    { "fn": "trendSeries", "args": [{ "$ref": "rows" }, "2026-08", 2], "path": "-1.Net", "expect": 1450 },
+
+    { "name": "what's outstanding still reads raw loan events: 2000 + 300 + 50 - 500", "fn": "loanOutstanding", "args": [{ "$ref": "loanEvents" }, "L1"], "expect": 1850 },
+    { "fn": "totalOutstanding", "args": [{ "$ref": "loans" }, { "$ref": "loanEvents" }], "expect": 1850 },
+    { "fn": "loanSummary", "args": [{ "$ref": "loans", "path": "0" }, { "$ref": "loanEvents" }, "2026-08-31"], "path": "repaid", "expect": 500 },
+    { "fn": "loanSummary", "args": [{ "$ref": "loans", "path": "0" }, { "$ref": "loanEvents" }, "2026-08-31"], "path": "outstanding", "expect": 1850 },
+    { "name": "an open-ended loan has no due date", "fn": "loanSummary", "args": [{ "$ref": "loans", "path": "0" }, { "$ref": "loanEvents" }, "2026-08-31"], "path": "dueDate", "expect": null },
+
+    { "name": "the per-category budget path stays on transactions alone", "fn": "forecast", "args": [{ "$ref": "transactions" }, "2026-08", {}, { "$date": "2026-09-01" }], "path": "spent", "expect": 1200 },
+
+    { "as": "cash", "fn": "cashRows", "args": [{ "$ref": "transactions" }, { "$ref": "loanEvents" }, { "$ref": "loans" }] },
+    { "name": "cash sees both legs of the principal and neither loan charge", "fn": "cashRows", "args": [{ "$ref": "transactions" }, { "$ref": "loanEvents" }, { "$ref": "loans" }], "path": "length", "expect": 5 },
+    { "name": "on cash, a drawdown IS money in — which is why the register names it separately rather than calling it income", "fn": "sumIncome", "args": [{ "$ref": "cash" }], "expect": 5000 },
+
+    { "name": "the register keeps one row per cash event", "fn": "withBalance", "args": [{ "$ref": "transactions" }, { "$ref": "loanEvents" }, { "$ref": "loans" }], "path": "length", "expect": 5 },
+    { "name": "the cash side of a repayment is labelled", "fn": "withBalance", "args": [{ "$ref": "transactions" }, { "$ref": "loanEvents" }, { "$ref": "loans" }], "path": "[id=e3].category", "expect": "Loan repayment" },
+    { "fn": "withBalance", "args": [{ "$ref": "transactions" }, { "$ref": "loanEvents" }, { "$ref": "loans" }], "path": "[id=e1].category", "expect": "Loan" },
+    { "name": "interest never reaches the register: no cash moved", "fn": "withBalance", "args": [{ "$ref": "transactions" }, { "$ref": "loanEvents" }, { "$ref": "loans" }], "path": "[id=e2]", "expectAbsent": true },
+    { "name": "newest first", "fn": "withBalance", "args": [{ "$ref": "transactions" }, { "$ref": "loanEvents" }, { "$ref": "loans" }], "path": "0.id", "expect": "e3" },
+    { "name": "running balance: 2000 drawn + 3000 - 1000 - 200 - 500", "fn": "withBalance", "args": [{ "$ref": "transactions" }, { "$ref": "loanEvents" }, { "$ref": "loans" }], "path": "0.balance", "expect": 3300 },
+    { "name": "the oldest row counts up from zero", "fn": "withBalance", "args": [{ "$ref": "transactions" }, { "$ref": "loanEvents" }, { "$ref": "loans" }], "path": "-1.balance", "expect": 2000 },
+
+    { "as": "regAug", "fn": "registerMonth", "args": [{ "$ref": "transactions" }, { "$ref": "loanEvents" }, { "$ref": "loans" }, "2026-08"] },
+    { "name": "August carries in the 2000 drawn in July", "fn": "registerMonth", "args": [{ "$ref": "transactions" }, { "$ref": "loanEvents" }, { "$ref": "loans" }, "2026-08"], "path": "opening", "expect": 2000 },
+    { "name": "earned is salary alone", "fn": "registerMonth", "args": [{ "$ref": "transactions" }, { "$ref": "loanEvents" }, { "$ref": "loans" }, "2026-08"], "path": "earned", "expect": 3000 },
+    { "name": "nothing was drawn in August", "fn": "registerMonth", "args": [{ "$ref": "transactions" }, { "$ref": "loanEvents" }, { "$ref": "loans" }, "2026-08"], "path": "loanDrawn", "expect": 0 },
+    { "name": "out is cash out, so the full repayment counts here", "fn": "registerMonth", "args": [{ "$ref": "transactions" }, { "$ref": "loanEvents" }, { "$ref": "loans" }, "2026-08"], "path": "expenses", "expect": 1700 },
+    { "name": "reconciliation: closing = opening + earned + drawn - out", "fn": "registerMonth", "args": [{ "$ref": "transactions" }, { "$ref": "loanEvents" }, { "$ref": "loans" }, "2026-08"], "path": "closing", "expect": 3300 },
+    { "name": "and closing equals the balance beside the newest row", "fn": "registerMonth", "args": [{ "$ref": "transactions" }, { "$ref": "loanEvents" }, { "$ref": "loans" }, "2026-08"], "path": "rows.0.balance", "expect": 3300 },
+    { "fn": "registerMonth", "args": [{ "$ref": "transactions" }, { "$ref": "loanEvents" }, { "$ref": "loans" }, "2026-08"], "path": "net", "expect": 1300 },
+
+    { "name": "July: a drawdown is money in, but it is not earnings", "fn": "registerMonth", "args": [{ "$ref": "transactions" }, { "$ref": "loanEvents" }, { "$ref": "loans" }, "2026-07"], "path": "earned", "expect": 0 },
+    { "fn": "registerMonth", "args": [{ "$ref": "transactions" }, { "$ref": "loanEvents" }, { "$ref": "loans" }, "2026-07"], "path": "loanDrawn", "expect": 2000 },
+    { "name": "the first month opens at zero", "fn": "registerMonth", "args": [{ "$ref": "transactions" }, { "$ref": "loanEvents" }, { "$ref": "loans" }, "2026-07"], "path": "opening", "expect": 0 },
+    { "fn": "registerMonth", "args": [{ "$ref": "transactions" }, { "$ref": "loanEvents" }, { "$ref": "loans" }, "2026-07"], "path": "closing", "expect": 2000 },
+
+    { "name": "an empty month still opens at what the month before it closed at", "fn": "registerMonth", "args": [{ "$ref": "transactions" }, { "$ref": "loanEvents" }, { "$ref": "loans" }, "2026-09"], "path": "opening", "expect": 3300 },
+    { "fn": "registerMonth", "args": [{ "$ref": "transactions" }, { "$ref": "loanEvents" }, { "$ref": "loans" }, "2026-09"], "path": "closing", "expect": 3300 },
+    { "fn": "registerMonth", "args": [{ "$ref": "transactions" }, { "$ref": "loanEvents" }, { "$ref": "loans" }, "2026-09"], "path": "rows.length", "expect": 0 },
+    { "name": "a month before any activity opens at zero", "fn": "registerMonth", "args": [{ "$ref": "transactions" }, { "$ref": "loanEvents" }, { "$ref": "loans" }, "2026-06"], "path": "opening", "expect": 0 }
+  ]
+}

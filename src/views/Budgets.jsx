@@ -38,10 +38,10 @@ export default function Budgets({ data, month }) {
   // "still unspent" claim money that was already gone.
   //
   // Transactions only, deliberately — this figure will read lower than the
-  // Overview's. Loan repayments count as expenses there (see `spendingRows` in
-  // lib/analytics), but a repayment has no budget line to spend against, so
-  // counting it here would report the plan as blown by money that was never
-  // planned. This is spend against plan, not everything that left the account.
+  // Overview's. Loan interest and penalties count as expenses there (see
+  // `costRows` in lib/analytics), but a loan charge has no budget line to spend
+  // against, so counting it here would report the plan as blown by money that
+  // was never planned. This is spend against plan, not everything it cost.
   const spent = A.sumExpenses(monthTx);
 
   const onChange = (cat, value) => {

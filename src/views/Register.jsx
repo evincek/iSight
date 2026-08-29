@@ -73,6 +73,29 @@ function EntryCard({ t, onDelete }) {
   );
 }
 
+/* ------------------------------------------------------------------ *
+ * Month reconciliation
+ *
+ * The register is a cash view: the balance column tracks what actually moved
+ * through the account, drawdowns included. So the footer has to show the
+ * drawdown as its own line rather than folding it into "earned" — it is money
+ * in, but it is not income — and the lines then satisfy
+ *
+ *   closing = opening + earned + loan drawn - out
+ *
+ * which is exactly the arithmetic the balance column beside them performs.
+ * ------------------------------------------------------------------ */
+const summaryLines = (s) => [
+  { key: "opening", label: "Opening", value: s.opening, tone: tokens.mute },
+  { key: "earned", label: "Earned", value: s.earned, tone: tokens.volt, sign: true },
+  ...(s.loanDrawn > 0
+    ? [{ key: "drawn", label: "Loan drawn", value: s.loanDrawn, tone: tokens.volt, sign: true }]
+    : []),
+  { key: "out", label: "Out", value: -s.expenses, tone: tokens.blood },
+  { key: "net", label: "Net", value: s.net, tone: s.net >= 0 ? tokens.volt : tokens.blood, strong: true },
+  { key: "closing", label: "Closing", value: s.closing, tone: tokens.chalk, strong: true },
+];
+
 export default function Register({ data, month }) {
   const narrow = useIsNarrow();
   const { transactions, loans, loanEvents, categories, addTransaction, deleteTransaction } = data;
@@ -86,12 +109,19 @@ export default function Register({ data, month }) {
   const [busy, setBusy] = useState(false);
   const [filter, setFilter] = useState("all");
 
+  // Balances and totals are computed over the whole month; the filter only
+  // narrows what's listed. Filtering first would leave the balance column
+  // stepping over rows it can't show and the totals disagreeing with it.
+  const summary = useMemo(
+    () => A.registerMonth(transactions, loanEvents, loans, month),
+    [transactions, loanEvents, loans, month]
+  );
+
   const rows = useMemo(() => {
-    const all = A.withBalance(transactions, loanEvents, loans).filter((r) => r.date.slice(0, 7) === month);
-    if (filter === "expense") return all.filter((r) => r.amount < 0);
-    if (filter === "income") return all.filter((r) => r.amount > 0);
-    return all;
-  }, [transactions, loanEvents, loans, month, filter]);
+    if (filter === "expense") return summary.rows.filter((r) => r.amount < 0);
+    if (filter === "income") return summary.rows.filter((r) => r.amount > 0);
+    return summary.rows;
+  }, [summary, filter]);
 
   const submit = async (e) => {
     e.preventDefault();
@@ -100,14 +130,6 @@ export default function Register({ data, month }) {
     setBusy(false);
     if (ok) setForm({ ...form, description: "", amount: "" });
   };
-
-  const totals = useMemo(() => {
-    // The same rows the register lists above, so "out" accounts for the loan
-    // repayments the user can see in the table — and agrees with the running
-    // balance beside them, which has always banked those rows.
-    const monthTx = A.inMonth(A.spendingRows(transactions, loanEvents, loans), month);
-    return { income: A.sumIncome(monthTx), expenses: A.sumExpenses(monthTx) };
-  }, [transactions, loanEvents, loans, month]);
 
   return (
     <div style={{ display: "grid", gap: 14 }}>
@@ -192,28 +214,21 @@ export default function Register({ data, month }) {
 
             <div style={{ paddingTop: 12 }}>
               <div style={{ ...display(14), marginBottom: 6 }}>Month totals</div>
+              {filter !== "all" && (
+                <div style={{ ...body(11, tokens.faint), marginBottom: 8 }}>
+                  Showing {filter} only — totals cover the whole month.
+                </div>
+              )}
               <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", rowGap: 4, columnGap: 12 }}>
-                <span style={labelStyle()}>In</span>
-                <span style={{ ...numeral(12.5, tokens.volt), textAlign: "right" }}>
-                  +{fmtMoney(totals.income)}
-                </span>
-                <span style={labelStyle()}>Out</span>
-                <span style={{ ...numeral(12.5, tokens.blood), textAlign: "right" }}>
-                  {fmtMoney(totals.expenses)}
-                </span>
-                <span style={labelStyle()}>Net</span>
-                <span
-                  style={{
-                    ...numeral(13.5, totals.income - totals.expenses >= 0 ? tokens.volt : tokens.blood),
-                    textAlign: "right",
-                  }}
-                >
-                  {fmtMoney(totals.income - totals.expenses)}
-                </span>
-                <span style={labelStyle()}>Balance</span>
-                <span style={{ ...numeral(13.5, tokens.chalk), textAlign: "right" }}>
-                  {rows.length > 0 ? fmtMoney(rows[0].balance) : "—"}
-                </span>
+                {summaryLines(summary).map((l) => (
+                  <React.Fragment key={l.key}>
+                    <span style={labelStyle()}>{l.label}</span>
+                    <span style={{ ...numeral(l.strong ? 13.5 : 12.5, l.tone), textAlign: "right" }}>
+                      {l.sign && l.value > 0 ? "+" : ""}
+                      {fmtMoney(l.value)}
+                    </span>
+                  </React.Fragment>
+                ))}
               </div>
             </div>
           </div>
@@ -275,30 +290,47 @@ export default function Register({ data, month }) {
                 </div>
               ))}
 
-              <div style={{ display: "grid", gridTemplateColumns: COLS, gap: 8, padding: "12px 0 0", alignItems: "baseline" }}>
-                <span />
-                <span>
-                  <span style={display(14)}>Month totals</span>
-                  <span style={{ ...body(11, tokens.faint), marginLeft: 10 }}>
-                    <span style={{ color: tokens.volt }}>+{fmtMoney(totals.income)}</span>
-                    {" in · "}
-                    <span style={{ color: tokens.blood }}>{fmtMoney(totals.expenses)}</span>
-                    {" out"}
-                  </span>
-                </span>
-                <span />
-                <span
+              {/* Newest first, so what was carried in from earlier months sits
+                  under the oldest row — the figure the column counts up from.
+                  Without it the balance beside the first entry of the month
+                  looks like it came from nowhere. */}
+              {filter === "all" && (
+                <div
                   style={{
-                    ...numeral(13, totals.income - totals.expenses >= 0 ? tokens.volt : tokens.blood),
-                    textAlign: "right",
+                    display: "grid", gridTemplateColumns: COLS, gap: 8, alignItems: "center",
+                    padding: "10px 0", borderBottom: `1px solid ${tokens.line}`,
                   }}
                 >
-                  {fmtMoney(totals.income - totals.expenses)}
-                </span>
-                <span style={{ ...numeral(13, tokens.chalk), textAlign: "right" }}>
-                  {rows.length > 0 ? fmtMoney(rows[0].balance) : "—"}
-                </span>
-                <span />
+                  <span />
+                  <span style={body(12.5, tokens.faint)}>Opening balance</span>
+                  <span /><span />
+                  <span style={{ ...numeral(12, tokens.faint), textAlign: "right" }}>
+                    {fmtMoney(summary.opening)}
+                  </span>
+                  <span />
+                </div>
+              )}
+
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 24, padding: "14px 0 0", alignItems: "flex-start" }}>
+                <div>
+                  <div style={display(14)}>Month totals</div>
+                  {filter !== "all" && (
+                    <div style={{ ...body(11, tokens.faint), marginTop: 4 }}>
+                      Showing {filter} only — totals cover the whole month.
+                    </div>
+                  )}
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "auto auto", rowGap: 4, columnGap: 16 }}>
+                  {summaryLines(summary).map((l) => (
+                    <React.Fragment key={l.key}>
+                      <span style={labelStyle()}>{l.label}</span>
+                      <span style={{ ...numeral(l.strong ? 13 : 12, l.tone), textAlign: "right" }}>
+                        {l.sign && l.value > 0 ? "+" : ""}
+                        {fmtMoney(l.value)}
+                      </span>
+                    </React.Fragment>
+                  ))}
+                </div>
               </div>
             </div>
           </ScrollX>

@@ -3,80 +3,122 @@
 // plain arrays and returns plain data.
 //
 //   npm test
+//
+// Most of the suite is *not* written here. It lives in spec/fixtures/*.json,
+// which is the shared specification for this layer: a Dart port of
+// analytics.js loads the same files and must produce the same values. Adding a
+// case there covers both languages at once; adding one here covers only JS, so
+// prefer a fixture unless the behaviour is genuinely JS-specific.
 
-import test from "node:test";
+import test, { describe } from "node:test";
 import assert from "node:assert/strict";
+import { readdirSync, readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
 import * as A from "../src/lib/analytics.js";
+import * as F from "../src/lib/format.js";
+import { seedEnv, runCase, caseName } from "../spec/harness.js";
 
-/* One month of activity, plus a loan taken the month before. Figures are round
- * so a wrong total is obvious rather than plausible. */
+const here = dirname(fileURLToPath(import.meta.url));
+const fixtureDir = join(here, "..", "spec", "fixtures");
+
+const fixtures = readdirSync(fixtureDir)
+  .filter((f) => f.endsWith(".json"))
+  .sort()
+  .map((f) => ({ file: f, ...JSON.parse(readFileSync(join(fixtureDir, f), "utf8")) }));
+
+/* ------------------------------------------------------------------ *
+ * The portable contract
+ * ------------------------------------------------------------------ */
+
+for (const fixture of fixtures) {
+  describe(`${fixture.file} — ${fixture.name}`, () => {
+    // One env per fixture: cases run in order and `as` names feed later cases,
+    // exactly as a Dart runner would replay them.
+    const env = seedEnv(fixture.ledger);
+
+    fixture.cases.forEach((testCase, i) => {
+      test(caseName(testCase, i), () => {
+        const r = runCase(A, testCase, env);
+        if (r.kind === "none") return; // setup step
+        if (r.kind === "close") {
+          assert.equal(
+            typeof r.actual,
+            "number",
+            `expected a number, got ${JSON.stringify(r.actual)}`
+          );
+          assert.ok(
+            Math.abs(r.actual - r.expected) <= r.tolerance,
+            `${r.actual} is not within ${r.tolerance} of ${r.expected}`
+          );
+          return;
+        }
+        assert.deepStrictEqual(r.actual, r.expected);
+      });
+    });
+  });
+}
+
+/* ------------------------------------------------------------------ *
+ * Coverage guard
+ * ------------------------------------------------------------------ */
+
+/**
+ * Functions deliberately outside the portable contract, with the reason.
+ *
+ * Both build user-facing sentences with `fmtMoney` and `monthLabel`, which call
+ * `toLocaleString(undefined, …)`. That output depends on the host locale, so it
+ * cannot be byte-matched across a Node runner and a Dart one. They are covered
+ * by the JS-only tests further down instead; a Dart port should assert on the
+ * `tone` field and on the figures fed in, not on the text.
+ */
+const LOCALE_SENSITIVE = new Set(["comparisonVerdict", "buildInsights"]);
+
+test("every exported function is covered by a fixture or explicitly excluded", () => {
+  const exported = Object.entries(A)
+    .filter(([, v]) => typeof v === "function")
+    .map(([k]) => k);
+
+  const covered = new Set(fixtures.flatMap((f) => f.cases.map((c) => c.fn)));
+
+  const uncovered = exported.filter(
+    (name) => !covered.has(name) && !LOCALE_SENSITIVE.has(name)
+  );
+
+  assert.deepStrictEqual(
+    uncovered,
+    [],
+    `these functions have no fixture case, so a Dart port could diverge on them ` +
+      `silently. Add one to spec/fixtures/, or add the name to LOCALE_SENSITIVE ` +
+      `with a reason: ${uncovered.join(", ")}`
+  );
+});
+
+test("the excluded list does not name functions that no longer exist", () => {
+  for (const name of LOCALE_SENSITIVE) {
+    assert.equal(typeof A[name], "function", `LOCALE_SENSITIVE names "${name}", which is gone`);
+  }
+});
+
+/* ------------------------------------------------------------------ *
+ * JS-only: locale-dependent text
+ * ------------------------------------------------------------------ */
+
 const tx = [
   { id: "t1", date: "2026-08-01", description: "Salary", category: "Income", amount: 3000 },
   { id: "t2", date: "2026-08-03", description: "Rent", category: "Housing", amount: -1000 },
   { id: "t3", date: "2026-08-10", description: "Groceries", category: "Food", amount: -200 },
 ];
-
 const loans = [
-  { id: "L1", name: "Kofi", principal: 2000, date: "2026-07-05", interestAmount: 0, durationMonths: null },
+  { id: "L1", name: "Kofi", principal: 2000, date: "2026-07-05", interestAmount: 300, durationMonths: null },
 ];
-
 const loanEvents = [
   { id: "e1", loanId: "L1", type: "taken", amount: 2000, date: "2026-07-05" },
   { id: "e2", loanId: "L1", type: "repayment", amount: 500, date: "2026-08-20" },
+  { id: "e3", loanId: "L1", type: "interest", amount: 300, date: "2026-08-05" },
 ];
 
-const rows = A.spendingRows(tx, loanEvents, loans);
-const aug = A.inMonth(rows, "2026-08");
-const jul = A.inMonth(rows, "2026-07");
-
-test("a loan repayment counts as an expense", () => {
-  assert.equal(A.sumExpenses(aug), 1700); // 1000 rent + 200 food + 500 repaid
-});
-
-test("drawing a loan down is not income", () => {
-  assert.equal(A.sumIncome(jul), 0);
-  // The projection only ever appends negative rows, so income is untouched.
-  assert.equal(A.sumIncome(aug), A.sumIncome(A.inMonth(tx, "2026-08")));
-  assert.equal(A.sumIncome(aug), 3000);
-});
-
-test("category rows sum to the expenses headline", () => {
-  // The identity the Overview relies on: "Where it went" adds up to Expenses.
-  const cats = A.byCategory(aug, ["Housing", "Food", "Income"]);
-  assert.equal(cats[A.LOAN_REPAYMENT_CATEGORY], 500);
-  assert.equal(
-    Object.values(cats).reduce((s, v) => s + v, 0),
-    A.sumExpenses(aug)
-  );
-});
-
-test("the month-over-month baseline counts repayments too", () => {
-  // Comparing a month that counts repayments against one that doesn't would
-  // report a spike that never happened.
-  const cmp = A.monthComparison(rows, "2026-08", "2026-07");
-  assert.equal(cmp.currTotal, 1700);
-  assert.equal(cmp.rows.find((r) => r.category === A.LOAN_REPAYMENT_CATEGORY).current, 500);
-});
-
-test("the trend series counts repayments", () => {
-  const trend = A.trendSeries(rows, "2026-08", 2);
-  assert.equal(trend.at(-1).Expenses, 1700);
-  assert.equal(trend.at(-1).Net, 1300);
-});
-
-test("what's outstanding still reads raw loan events", () => {
-  assert.equal(A.loanOutstanding(loanEvents, "L1"), 1500);
-  assert.equal(A.totalOutstanding(loans, loanEvents), 1500);
-  assert.equal(A.loanSummary(loans[0], loanEvents, "2026-08-31").repaid, 500);
-});
-
-test("the budget path stays on transactions alone", () => {
-  // A repayment has no budget line, so it must not move spend-against-plan.
-  assert.equal(A.forecast(tx, "2026-08", {}, new Date("2026-09-01")).spent, 1200);
-  assert.equal(A.sumExpenses(A.inMonth(tx, "2026-08")), 1200);
-});
-
-test("a synthetic repayment bucket can never trip an over-budget check", () => {
+test("a synthetic loan-charge bucket can never trip an over-budget check", () => {
   const insights = A.buildInsights({
     transactions: tx,
     loans,
@@ -88,37 +130,66 @@ test("a synthetic repayment bucket can never trip an over-budget check", () => {
   });
   const over = insights.find((i) => i.text.startsWith("Over budget in"));
   assert.ok(over, "Housing is 1000 against a 900 budget");
-  assert.ok(!over.text.includes(A.LOAN_REPAYMENT_CATEGORY));
+  assert.ok(!over.text.includes(A.LOAN_INTEREST_CATEGORY));
 
-  // And the repayment did reach the figures the insights are built on: 1300
-  // saved of 3000 earned, and Housing at 1000 of 1700 spent rather than 1200.
-  assert.ok(insights.some((i) => i.text === "You saved 43% of income this month."));
-  assert.ok(insights.some((i) => i.text === "Housing is your biggest expense — 59% of spending."));
+  // The interest reached the figures the insights are built on and the
+  // repayment did not: August cost 1500 (1000 rent + 200 food + 300 interest),
+  // not 1700 (which would count the 500 of principal handed back).
+  assert.ok(insights.some((i) => i.text === "You saved 50% of income this month."));
+  assert.ok(insights.some((i) => i.text === "Housing is your biggest expense — 67% of spending."));
 });
 
-test("the register keeps one row per event and labels the cash side", () => {
-  const register = A.withBalance(tx, loanEvents, loans);
-  assert.equal(register.length, 5);
-  assert.equal(new Set(register.map((r) => r.id)).size, register.length);
-  assert.equal(register.find((r) => r.id === "e2").category, A.LOAN_REPAYMENT_CATEGORY);
-  assert.equal(register.find((r) => r.id === "e1").category, "Loan");
-  // Newest first, and the running balance is unchanged by this refactor:
-  // 2000 drawn - 0 + 3000 - 1000 - 200 - 500.
-  assert.equal(register[0].balance, 3300);
+test("the verdict reports direction and magnitude", () => {
+  const rows = A.costRows(tx, loanEvents, loans);
+  const cmp = A.monthComparison(rows, "2026-08", "2026-07");
+  const verdict = A.comparisonVerdict(cmp, "2026-08", "2026-07");
+  // July holds no spending, so August is the first month with any.
+  assert.match(verdict, /^First month with spending/);
 });
 
-test("interest and penalty raise what's owed without moving cash", () => {
-  const withCharges = [
-    ...loanEvents,
-    { id: "e3", loanId: "L1", type: "interest", amount: 100, date: "2026-08-06" },
-    { id: "e4", loanId: "L1", type: "penalty", amount: 50, date: "2026-08-07" },
-  ];
-  assert.equal(A.totalOutstanding(loans, withCharges), 1650);
-  // Neither shows up as spending — only the repayment does.
-  assert.equal(A.sumExpenses(A.inMonth(A.spendingRows(tx, withCharges, loans), "2026-08")), 1700);
+/* ------------------------------------------------------------------ *
+ * JS-only: the configured currency symbol
+ * ------------------------------------------------------------------ */
+
+// fmtMoney's digit grouping comes from toLocaleString and varies by host
+// locale, so these assert on the symbol rather than the whole string.
+// fmtCompact uses toFixed/Math.round only, so it is exact everywhere.
+
+test("the currency symbol is configurable, and restores cleanly", () => {
+  const original = F.getCurrency();
+  try {
+    F.setCurrency("₵");
+    assert.match(F.fmtMoney(-1234.5), /^-₵/);
+    assert.equal(F.fmtCompact(12400), "₵12k");
+
+    F.setCurrency("$");
+    assert.match(F.fmtMoney(-1234.5), /^-\$/);
+    assert.equal(F.fmtCompact(12400), "$12k");
+    assert.equal(F.fmtCompact(-1_500_000), "-$1.5m");
+
+    // A multi-character symbol is a symbol like any other.
+    F.setCurrency("KSh");
+    assert.equal(F.fmtCompact(2500), "KSh2.5k");
+
+    // An empty or missing setting must not render an unlabelled number.
+    F.setCurrency("");
+    assert.equal(F.fmtCompact(100), "₵100");
+    F.setCurrency(undefined);
+    assert.equal(F.fmtCompact(100), "₵100");
+  } finally {
+    // Module-level state is shared across this whole file: leaving it changed
+    // would silently alter the buildInsights assertions above.
+    F.setCurrency(original);
+  }
 });
 
-test("the aggregates hold up with no loans at all", () => {
-  assert.deepEqual(A.spendingRows(tx), tx);
-  assert.equal(A.sumExpenses(A.inMonth(A.spendingRows(tx, [], []), "2026-08")), 1200);
+test("every offered currency has a symbol, code and name", () => {
+  assert.ok(F.CURRENCIES.length > 1);
+  for (const c of F.CURRENCIES) {
+    assert.ok(c.symbol && c.code && c.name, `incomplete entry: ${JSON.stringify(c)}`);
+  }
+  const codes = F.CURRENCIES.map((c) => c.code);
+  assert.equal(new Set(codes).size, codes.length, "duplicate currency code");
+  // The default has to be selectable, or Settings opens on a blank picker.
+  assert.ok(F.CURRENCIES.some((c) => c.symbol === "₵"));
 });

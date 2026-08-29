@@ -1,6 +1,12 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { supabase } from "../lib/supabaseClient";
 import { normalizeCategory, sameCategory } from "../lib/categories";
+import { setCurrency, getCurrency } from "../lib/format";
+
+// The built-in default, read once at module load before anything reconfigures
+// it — so a failed or absent profile read falls back to a known symbol rather
+// than to whatever the last signed-in user happened to choose.
+const DEFAULT_SYMBOL = getCurrency();
 
 export const DEFAULT_CATEGORIES = [
   "Housing",
@@ -51,20 +57,41 @@ export function useLedgerData(userId) {
   const [loanEvents, setLoanEvents] = useState([]);
   const [budgets, setBudgets] = useState({});
   const [categories, setCategories] = useState([]);
+  const [currency, setCurrencyState] = useState(getCurrency());
 
   const loadAll = useCallback(async () => {
     setErrorMsg("");
     try {
-      const [txRes, loanRes, eventRes, budgetRes, catRes] = await Promise.all([
+      const [txRes, loanRes, eventRes, budgetRes, catRes, profileRes] = await Promise.all([
         supabase.from("transactions").select("*").order("date", { ascending: false }),
         supabase.from("loans").select("*").order("date", { ascending: false }),
         supabase.from("loan_events").select("*").order("date", { ascending: false }),
         supabase.from("budgets").select("*"),
         supabase.from("categories").select("*").order("created_at", { ascending: true }),
+        supabase.from("profiles").select("currency").eq("id", userId).maybeSingle(),
       ]);
       for (const r of [txRes, loanRes, eventRes, budgetRes, catRes]) {
         if (r.error) throw r.error;
       }
+
+      // `profiles` is deliberately not in that list. Migrations are applied by
+      // hand in the Supabase editor, so this code can reach a database where
+      // 007 has not run yet — and a missing display preference must not stop
+      // someone opening their ledger. Anything unreadable here falls back to
+      // the default symbol and the rest of the load carries on.
+      let symbol = profileRes.error ? null : profileRes.data?.currency;
+      if (!profileRes.error && !symbol) {
+        // No row: this account signed up after 007's backfill ran. Seed it the
+        // same way default categories are seeded, ignoring a row another tab
+        // inserted first. A failure here is equally non-fatal.
+        await supabase
+          .from("profiles")
+          .upsert({ id: userId }, { onConflict: "id", ignoreDuplicates: true });
+      }
+      // The module-level symbol is what the ~76 formatting call sites read; the
+      // state copy is what makes React re-render when it changes.
+      setCurrency(symbol || DEFAULT_SYMBOL);
+      setCurrencyState(symbol || DEFAULT_SYMBOL);
 
       setTransactions(txRes.data.map((t) => ({ ...t, amount: Number(t.amount) })));
       setLoans(loanRes.data.map(shapeLoan));
@@ -266,6 +293,27 @@ export function useLedgerData(userId) {
     [userId]
   );
 
+  const updateCurrency = useCallback(
+    async (symbol) => {
+      const prev = getCurrency();
+      // Set both before the round trip so the whole ledger re-renders in the
+      // new currency immediately; roll back together if the write fails.
+      setCurrency(symbol);
+      setCurrencyState(symbol);
+      const { error } = await supabase
+        .from("profiles")
+        .upsert({ id: userId, currency: symbol }, { onConflict: "id" });
+      if (error) {
+        setCurrency(prev);
+        setCurrencyState(prev);
+        setErrorMsg(error.message);
+        return false;
+      }
+      return true;
+    },
+    [userId]
+  );
+
   const sendFeedback = useCallback(
     async (message, page) => {
       const { error } = await supabase.from("feedback").insert({
@@ -289,6 +337,7 @@ export function useLedgerData(userId) {
       loanEvents,
       budgets,
       categories,
+      currency,
       reload: loadAll,
       addTransaction,
       deleteTransaction,
@@ -296,12 +345,13 @@ export function useLedgerData(userId) {
       addCategory,
       addLoan,
       addRepayment,
+      updateCurrency,
       sendFeedback,
     }),
     [
       loaded, errorMsg, transactions, loans, loanEvents, budgets, categories,
-      loadAll, addTransaction, deleteTransaction, setBudget, addCategory,
-      addLoan, addRepayment, sendFeedback,
+      currency, loadAll, addTransaction, deleteTransaction, setBudget,
+      addCategory, addLoan, addRepayment, updateCurrency, sendFeedback,
     ]
   );
 }

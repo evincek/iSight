@@ -11,7 +11,7 @@ Stack: Vite + React (plain JSX), Recharts, Supabase. No backend of your own.
 
 1. Go to [supabase.com](https://supabase.com) and create a free account and project.
 2. Open **SQL Editor → New query** and run the files in [`migrations/`](migrations/)
-   **in numerical order** (`001` through `004`). They're idempotent —
+   **in numerical order** (`001` through `007`). They're idempotent —
    re-running them is safe and changes nothing.
 3. Go to **Project Settings → API**. Copy the **Project URL** and the
    **anon public** key.

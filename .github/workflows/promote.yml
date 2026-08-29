@@ -37,7 +37,15 @@ jobs:
 
       - run: npm ci
 
-      # The only gate. VITE_SUPABASE_* are absent here and that is fine:
+      # First gate. spec/fixtures/*.json is the shared specification for the
+      # derived-data layer, so a red test here means the numbers on screen have
+      # changed — which is exactly the change that must not reach main
+      # unnoticed. Runs before the build because a failed assertion says what
+      # broke, where a failed build only says that something did.
+      - name: Test
+        run: npm test
+
+      # Second gate. VITE_SUPABASE_* are absent here and that is fine:
       # src/lib/supabaseClient.js turns missing env vars into a configError
       # string rather than throwing, so the build still compiles. Vercel does
       # the real env-injected production build after main moves.

@@ -3,9 +3,45 @@
 
 export const todayISO = () => new Date().toISOString().slice(0, 10);
 
+/**
+ * The display currency.
+ *
+ * Configured once per session rather than threaded through every call: money is
+ * formatted at ~76 sites across the views, and passing a symbol to each of them
+ * would add noise everywhere to express something that never varies within a
+ * session. `useLedgerData` calls `setCurrency` when it loads the user's profile,
+ * and re-renders the tree so the new symbol is picked up.
+ *
+ * Amounts are stored and summed as plain numbers throughout — this is a
+ * rendering concern only, and changing it never touches the data.
+ */
+const DEFAULT_CURRENCY = "₵";
+let currencySymbol = DEFAULT_CURRENCY;
+
+/** Currencies offered in Settings. `symbol` is what gets stored and rendered. */
+export const CURRENCIES = [
+  { symbol: "₵", code: "GHS", name: "Ghanaian cedi" },
+  { symbol: "$", code: "USD", name: "US dollar" },
+  { symbol: "€", code: "EUR", name: "Euro" },
+  { symbol: "£", code: "GBP", name: "Pound sterling" },
+  { symbol: "₦", code: "NGN", name: "Nigerian naira" },
+  { symbol: "KSh", code: "KES", name: "Kenyan shilling" },
+  { symbol: "R", code: "ZAR", name: "South African rand" },
+  { symbol: "₹", code: "INR", name: "Indian rupee" },
+  { symbol: "¥", code: "JPY", name: "Japanese yen" },
+  { symbol: "C$", code: "CAD", name: "Canadian dollar" },
+  { symbol: "A$", code: "AUD", name: "Australian dollar" },
+];
+
+export const setCurrency = (symbol) => {
+  currencySymbol = symbol || DEFAULT_CURRENCY;
+};
+
+export const getCurrency = () => currencySymbol;
+
 export const fmtMoney = (n) => {
   const sign = n < 0 ? "-" : "";
-  return `${sign}₵${Math.abs(n).toLocaleString(undefined, {
+  return `${sign}${currencySymbol}${Math.abs(n).toLocaleString(undefined, {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })}`;
@@ -15,9 +51,9 @@ export const fmtMoney = (n) => {
 export const fmtCompact = (n) => {
   const abs = Math.abs(n);
   const sign = n < 0 ? "-" : "";
-  if (abs >= 1_000_000) return `${sign}₵${(abs / 1_000_000).toFixed(1)}m`;
-  if (abs >= 1_000) return `${sign}₵${(abs / 1_000).toFixed(abs >= 10_000 ? 0 : 1)}k`;
-  return `${sign}₵${Math.round(abs)}`;
+  if (abs >= 1_000_000) return `${sign}${currencySymbol}${(abs / 1_000_000).toFixed(1)}m`;
+  if (abs >= 1_000) return `${sign}${currencySymbol}${(abs / 1_000).toFixed(abs >= 10_000 ? 0 : 1)}k`;
+  return `${sign}${currencySymbol}${Math.round(abs)}`;
 };
 
 export const fmtPct = (n, digits = 0) =>

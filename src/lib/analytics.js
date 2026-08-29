@@ -491,16 +491,38 @@ export function loanSummary(loan, loanEvents, today = todayISO()) {
   };
 }
 
+/* ------------------------------------------------------------------ *
+ * The two bases
+ *
+ * A loan can be read two ways, and mixing them is what makes figures stop
+ * adding up. Each of the functions below commits to one:
+ *
+ *   cash — what moved through the account. Drawing a loan down is money in,
+ *          repaying it is money out. Interest that hasn't been paid yet is
+ *          nothing at all. This is the register's basis: the running balance
+ *          is cash by definition.
+ *
+ *   cost — what it actually cost you. Repaying principal cancels a debt you
+ *          already banked, so it isn't spending; the round trip nets to zero.
+ *          Interest and penalties are the real cost, counted when charged.
+ *          This is the basis for every "what did I spend" figure.
+ *
+ * The same ledger gives different, individually-correct answers on the two.
+ * Read one basis per surface and never add figures across them.
+ * ------------------------------------------------------------------ */
+
 /** Category filed against the cash side of a loan repayment. */
 export const LOAN_REPAYMENT_CATEGORY = "Loan repayment";
 
+/** Category filed against interest and penalties on the cost basis. */
+export const LOAN_INTEREST_CATEGORY = "Loan interest";
+
 /**
- * Loan events as transaction-shaped rows: same fields, same sign convention, so
- * anything that reads transactions can read these too.
+ * The loan's *cash* movements as transaction-shaped rows: same fields, same
+ * sign convention, so anything that reads transactions can read these too.
  *
- * Only cash movements are projected. Interest and penalty events raise what's
- * owed without any money changing hands, so they're reported on the Loans view
- * instead of banked here.
+ * Interest and penalty events raise what's owed without any money changing
+ * hands, so they're absent here by design — `loanCostRows` is where they land.
  *
  * The repayment category is a synthetic name that isn't in the user's category
  * list, so `alignBudgets` never gives it a budget and it can't trip an
@@ -513,6 +535,9 @@ export function loanCashRows(loanEvents = [], loans = []) {
     .map((e) => ({
       id: e.id,
       date: e.date,
+      // Carried through so the register can break same-day ties by the order
+      // things were actually recorded rather than arbitrarily.
+      createdAt: e.created_at ?? e.createdAt ?? null,
       description: `${e.type === "taken" ? "Loan received" : "Loan repayment"} — ${
         (loans.find((l) => l.id === e.loanId) || {}).name || "Loan"
       }`,
@@ -523,44 +548,147 @@ export function loanCashRows(loanEvents = [], loans = []) {
 }
 
 /**
- * The rows every spending aggregate should see: all transactions, plus loan
- * repayments as negative rows. Paying a loan down moves money out of the
- * account like any other expense, so it belongs in the totals that claim to say
- * what the month cost.
+ * The loan's *cost* as transaction-shaped rows: interest and penalties, as
+ * negative rows, dated when they were charged.
  *
- * Income is untouched — only negative rows are appended, so
- * `sumIncome(spendingRows(...)) === sumIncome(transactions)` always. Drawing a
- * loan down is a liability, not earnings; it stays on the "Loans owed" line.
+ * Principal appears on neither side. Borrowing ₵500 and handing ₵500 back is a
+ * round trip that left you no poorer, and counting either leg as spending makes
+ * a month's total swing on borrowing timing rather than on how you lived. What
+ * borrowing genuinely costs is the interest, and that is what shows up here.
  *
- * Deliberately *not* for budget-facing figures. `forecast`, `budgetBurn`,
- * `burnCurve`, `detectRecurring` and the Budgets view stay on raw transactions:
- * a repayment has no budget line to spend against.
+ * Uses the same synthetic-category trick as `loanCashRows`, for the same
+ * reason: no budget line can be tripped by a charge nobody budgeted for.
  */
-export const spendingRows = (transactions, loanEvents = [], loans = []) => [
+export function loanCostRows(loanEvents = [], loans = []) {
+  return loanEvents
+    .filter((e) => e.type === "interest" || e.type === "penalty")
+    .map((e) => ({
+      id: e.id,
+      date: e.date,
+      createdAt: e.created_at ?? e.createdAt ?? null,
+      description: `${e.type === "interest" ? "Loan interest" : "Loan penalty"} — ${
+        (loans.find((l) => l.id === e.loanId) || {}).name || "Loan"
+      }`,
+      category: LOAN_INTEREST_CATEGORY,
+      amount: -e.amount,
+      kind: "loan",
+    }));
+}
+
+/**
+ * Cash basis: transactions plus every loan cash movement, both directions.
+ *
+ * This is what the running balance is built from, so `sumIncome` over these
+ * rows includes drawdowns. That is correct for cash and wrong for earnings —
+ * the register labels the drawdown separately rather than folding it into
+ * "earned".
+ */
+export const cashRows = (transactions, loanEvents = [], loans = []) => [
   ...transactions,
-  ...loanCashRows(loanEvents, loans).filter((r) => r.amount < 0),
+  ...loanCashRows(loanEvents, loans),
 ];
 
 /**
- * Merges transactions and loan events into one date-sorted register with a
- * running balance. Loan events are synthetic read-only rows.
+ * Cost basis: transactions plus interest and penalties. The rows every
+ * "what did I spend" aggregate should see.
+ *
+ * Income is untouched — only negative rows are appended, so
+ * `sumIncome(costRows(...)) === sumIncome(transactions)` always. Drawing a loan
+ * down is a liability, not earnings; it stays on the "Loans owed" line.
+ *
+ * Deliberately *not* for per-category budget figures. `budgetBurn` and
+ * `detectRecurring` stay on raw transactions: interest has no budget line to
+ * spend against, and a one-off interest charge must not be learned as a
+ * monthly subscription.
+ */
+export const costRows = (transactions, loanEvents = [], loans = []) => [
+  ...transactions,
+  ...loanCostRows(loanEvents, loans),
+];
+
+/* ------------------------------------------------------------------ *
+ * Register
+ * ------------------------------------------------------------------ */
+
+/**
+ * Total order over register rows: date, then when it was recorded, then id.
+ *
+ * The id fallback is what makes this a *total* order rather than a partial one.
+ * A comparator that returns a non-zero value for equivalent rows breaks the
+ * contract `Array#sort` is specified against, and the running balance is only
+ * readable if the displayed order is exactly the reverse of the order the
+ * balance was accumulated in.
+ */
+const byLedgerOrder = (a, b) => {
+  if (a.date !== b.date) return a.date < b.date ? -1 : 1;
+  const ac = a.createdAt || "";
+  const bc = b.createdAt || "";
+  if (ac !== bc) return ac < bc ? -1 : 1;
+  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+};
+
+/**
+ * Merges transactions and loan cash events into one register with a running
+ * balance, newest first. Loan events are synthetic read-only rows.
+ *
+ * Sorted once ascending and reversed, rather than sorted twice: that is what
+ * guarantees each row's balance is the row below it plus this row's amount,
+ * which is the only reason the column is readable at all.
  */
 export function withBalance(transactions, loanEvents, loans) {
-  const events = [
-    ...transactions.map((t) => ({ ...t, kind: "transaction" })),
-    ...loanCashRows(loanEvents, loans),
-  ].sort((a, b) => (a.date > b.date ? 1 : -1));
+  const events = cashRows(
+    transactions.map((t) => ({ ...t, kind: "transaction" })),
+    loanEvents,
+    loans
+  )
+    .map((e) => ({ ...e, createdAt: e.createdAt ?? e.created_at ?? null }))
+    .sort(byLedgerOrder);
 
   let bal = 0;
-  const balances = {};
-  events.forEach((e) => {
+  const ascending = events.map((e) => {
     bal += e.amount;
-    balances[e.id] = bal;
+    return { ...e, balance: bal };
   });
 
-  return events
-    .map((e) => ({ ...e, balance: balances[e.id] }))
-    .sort((a, b) => (a.date < b.date ? 1 : -1));
+  return ascending.reverse();
+}
+
+/**
+ * Everything the register footer needs for one month, as data.
+ *
+ * Satisfies `closing === opening + earned + loanDrawn - expenses`. Keeping that
+ * identity in one place — rather than re-derived across the view — is what
+ * stops the totals drifting away from the balance column beside them.
+ *
+ * `opening` is the balance carried in from before `key`, so the column
+ * reconciles within the month instead of silently depending on all history.
+ */
+export function registerMonth(transactions, loanEvents, loans, key) {
+  const all = withBalance(transactions, loanEvents, loans); // newest first
+  const rows = all.filter((r) => monthKey(r.date) === key);
+
+  // The oldest row in the month, minus its own amount, is what was carried in.
+  // With no rows this month, it's whatever the last row before it closed at.
+  const oldest = rows[rows.length - 1];
+  const opening = oldest
+    ? oldest.balance - oldest.amount
+    : (all.find((r) => monthKey(r.date) < key) || { balance: 0 }).balance;
+
+  const earned = sumIncome(rows.filter((r) => r.kind !== "loan"));
+  const loanDrawn = rows
+    .filter((r) => r.kind === "loan" && r.amount > 0)
+    .reduce((s, r) => s + r.amount, 0);
+  const expenses = sumExpenses(rows);
+
+  return {
+    rows,
+    opening,
+    closing: opening + earned + loanDrawn - expenses,
+    earned,
+    loanDrawn,
+    expenses,
+    net: earned + loanDrawn - expenses,
+  };
 }
 
 /* ------------------------------------------------------------------ *
@@ -569,11 +697,11 @@ export function withBalance(transactions, loanEvents, loans) {
 
 export function buildInsights({ transactions, loans, loanEvents, budgets, categories = [], key, now = new Date() }) {
   const plan = alignBudgets(budgets, categories);
-  // Loan repayments count as expenses; drawing a loan down does not count as
-  // income (it shows on the "Loans owed" line instead). Both months read from
-  // the same rows — comparing a month that counts repayments against a baseline
-  // that doesn't would report a phantom spike.
-  const rows = spendingRows(transactions, loanEvents, loans);
+  // Cost basis: interest and penalties count as expenses, repaying principal
+  // does not, and drawing a loan down is not income (it shows on the "Loans
+  // owed" line instead). Both months read from the same rows — comparing a
+  // month on one basis against a baseline on another reports a phantom spike.
+  const rows = costRows(transactions, loanEvents, loans);
   const monthTx = inMonth(rows, key);
   const income = sumIncome(monthTx);
   const expenses = sumExpenses(monthTx);
@@ -617,18 +745,18 @@ export function buildInsights({ transactions, loans, loanEvents, budgets, catego
       });
     }
 
-    // `plan[c] > 0` is what keeps the synthetic "Loan repayment" bucket out of
+    // `plan[c] > 0` is what keeps the synthetic "Loan interest" bucket out of
     // this: it never has a budget, and `undefined > 0` is false.
     const over = Object.entries(cats).filter(([c, amt]) => plan[c] > 0 && amt > plan[c]);
     if (over.length > 0) {
       out.push({ tone: "bad", text: `Over budget in ${over.map(([c]) => c).join(", ")} this month.` });
     }
 
-    // Raw `transactions` on purpose. `forecast` runs `detectRecurring`
-    // internally, and a fixed monthly repayment is a textbook match — folding
-    // repayments in would inflate the projection and fire "on pace to finish
-    // over budget" for money that was never budgeted in the first place.
-    const fc = forecast(transactions, key, plan, now);
+    // Cost rows, matching the Analytics tiles — the two must not disagree
+    // about what the month is on pace to cost. Repayments are absent from this
+    // basis, which also keeps `detectRecurring` (run inside `forecast`) from
+    // learning a fixed monthly repayment as a subscription.
+    const fc = forecast(rows, key, plan, now);
     if (!fc.complete && fc.projected > 0 && fc.budgetTotal > 0) {
       out.push({
         tone: fc.projected > fc.budgetTotal ? "bad" : "good",

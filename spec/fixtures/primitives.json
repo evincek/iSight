@@ -1,0 +1,60 @@
+{
+  "name": "slicing, ratios and loan primitives",
+  "description": "The small pure helpers the bigger functions are built from. Cheap to get right and expensive to get subtly wrong, so they are pinned independently rather than only through their callers.",
+  "ledger": {
+    "transactions": [
+      { "id": "t1", "date": "2026-07-28", "description": "Salary", "category": "Income", "amount": 3000 },
+      { "id": "t2", "date": "2026-08-03", "description": "Rent", "category": "Housing", "amount": -1000 },
+      { "id": "t3", "date": "2026-08-10", "description": "Groceries", "category": "Food", "amount": -200 },
+      { "id": "t4", "date": "2026-09-02", "description": "Fuel", "category": "Transport", "amount": -80 }
+    ],
+    "loans": [
+      { "id": "L1", "name": "Kofi", "principal": 2000, "date": "2026-07-05", "interestAmount": 0, "durationMonths": null }
+    ],
+    "loanEvents": [
+      { "id": "e1", "loanId": "L1", "type": "taken", "amount": 2000, "date": "2026-07-05" },
+      { "id": "e2", "loanId": "L1", "type": "repayment", "amount": 500, "date": "2026-08-20" },
+      { "id": "e3", "loanId": "L1", "type": "interest", "amount": 100, "date": "2026-08-06" },
+      { "id": "e4", "loanId": "L1", "type": "penalty", "amount": 50, "date": "2026-08-20" }
+    ],
+    "budgets": {},
+    "categories": ["Housing", "Food", "Transport", "Income"]
+  },
+  "cases": [
+    { "name": "inRange is inclusive at both ends", "fn": "inRange", "args": [{ "$ref": "transactions" }, "2026-08-03", "2026-08-10"], "path": "length", "expect": 2 },
+    { "fn": "inRange", "args": [{ "$ref": "transactions" }, "2026-08-03", "2026-08-10"], "path": "0.id", "expect": "t2" },
+    { "name": "inRange excludes the day before the window", "fn": "inRange", "args": [{ "$ref": "transactions" }, "2026-08-04", "2026-09-30"], "path": "length", "expect": 2 },
+
+    { "name": "pctChange is a plain percentage", "fn": "pctChange", "args": [150, 100], "expectClose": 50 },
+    { "name": "a fall is negative", "fn": "pctChange", "args": [50, 100], "expectClose": -50 },
+    { "name": "no baseline and no change is zero, not a divide by zero", "fn": "pctChange", "args": [0, 0], "expect": 0 },
+    { "name": "growth from nothing has no meaningful percentage", "fn": "pctChange", "args": [5, 0], "expect": null },
+
+    { "name": "rollingAverage takes the tail of the series", "fn": "rollingAverage", "args": [[1, 2, 3, 4], 2], "expectClose": 3.5 },
+    { "name": "a window longer than the series averages what there is", "fn": "rollingAverage", "args": [[1, 2, 3, 4], 10], "expectClose": 2.5 },
+    { "name": "an empty series averages to zero rather than NaN", "fn": "rollingAverage", "args": [[], 3], "expect": 0 },
+
+    { "name": "loanTotal sums one event type", "fn": "loanTotal", "args": [{ "$ref": "loanEvents" }, "L1", "taken"], "expect": 2000 },
+    { "fn": "loanTotal", "args": [{ "$ref": "loanEvents" }, "L1", "repayment"], "expect": 500 },
+    { "name": "an unknown loan sums to zero", "fn": "loanTotal", "args": [{ "$ref": "loanEvents" }, "nope", "taken"], "expect": 0 },
+    { "name": "interest and penalties count towards what is owed", "fn": "loanOutstanding", "args": [{ "$ref": "loanEvents" }, "L1"], "expect": 1650 },
+
+    { "name": "a term clamps to the last day of the target month", "fn": "loanDueDate", "args": [{ "date": "2026-01-31", "durationMonths": 1 }], "expect": "2026-02-28" },
+    { "name": "a whole-month term lands on the same day number", "fn": "loanDueDate", "args": [{ "date": "2026-07-05", "durationMonths": 6 }], "expect": "2027-01-05" },
+    { "name": "an open-ended loan has no due date", "fn": "loanDueDate", "args": [{ "date": "2026-07-05", "durationMonths": null }], "expect": null },
+
+    { "name": "only cash events become register rows", "fn": "loanCashRows", "args": [{ "$ref": "loanEvents" }, { "$ref": "loans" }], "path": "length", "expect": 2 },
+    { "name": "a drawdown is positive and named after the loan", "fn": "loanCashRows", "args": [{ "$ref": "loanEvents" }, { "$ref": "loans" }], "path": "[id=e1]", "expect": { "id": "e1", "date": "2026-07-05", "createdAt": null, "description": "Loan received — Kofi", "category": "Loan", "amount": 2000, "kind": "loan" } },
+    { "name": "a repayment flips sign so cash aggregates can read it", "fn": "loanCashRows", "args": [{ "$ref": "loanEvents" }, { "$ref": "loans" }], "path": "[id=e2].amount", "expect": -500 },
+    { "name": "interest never reaches the register: no cash moved", "fn": "loanCashRows", "args": [{ "$ref": "loanEvents" }, { "$ref": "loans" }], "path": "[id=e3]", "expectAbsent": true },
+    { "name": "an orphaned event falls back to a generic name", "fn": "loanCashRows", "args": [{ "$ref": "loanEvents" }, []], "path": "[id=e1].description", "expect": "Loan received — Loan" },
+
+    { "name": "only charges become cost rows — the mirror image of loanCashRows", "fn": "loanCostRows", "args": [{ "$ref": "loanEvents" }, { "$ref": "loans" }], "path": "length", "expect": 2 },
+    { "name": "interest is an expense, dated when it was charged", "fn": "loanCostRows", "args": [{ "$ref": "loanEvents" }, { "$ref": "loans" }], "path": "[id=e3]", "expect": { "id": "e3", "date": "2026-08-06", "createdAt": null, "description": "Loan interest — Kofi", "category": "Loan interest", "amount": -100, "kind": "loan" } },
+    { "name": "a penalty is filed in the same bucket", "fn": "loanCostRows", "args": [{ "$ref": "loanEvents" }, { "$ref": "loans" }], "path": "[id=e4].category", "expect": "Loan interest" },
+    { "fn": "loanCostRows", "args": [{ "$ref": "loanEvents" }, { "$ref": "loans" }], "path": "[id=e4].amount", "expect": -50 },
+    { "name": "the principal drawn down is not a cost", "fn": "loanCostRows", "args": [{ "$ref": "loanEvents" }, { "$ref": "loans" }], "path": "[id=e1]", "expectAbsent": true },
+    { "name": "nor is the principal handed back", "fn": "loanCostRows", "args": [{ "$ref": "loanEvents" }, { "$ref": "loans" }], "path": "[id=e2]", "expectAbsent": true },
+    { "name": "an orphaned charge falls back to a generic name", "fn": "loanCostRows", "args": [{ "$ref": "loanEvents" }, []], "path": "[id=e3].description", "expect": "Loan interest — Loan" }
+  ]
+}
