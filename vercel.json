@@ -1,0 +1,21 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "rewrites": [
+    { "source": "/user-guide", "destination": "/user-guide.pdf" }
+  ],
+  "headers": [
+    {
+      "source": "/user-guide(.pdf)?",
+      "headers": [
+        {
+          "key": "Content-Disposition",
+          "value": "inline; filename=\"personal-ledger-user-guide.pdf\""
+        },
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=0, s-maxage=3600, stale-while-revalidate=86400"
+        }
+      ]
+    }
+  ]
+}
