@@ -1,0 +1,55 @@
+{
+  "name": "trends, rolling averages, heatmap and recurring detection",
+  "description": "Three months of activity. Netflix is a textbook recurring charge (3 hits, 30/31-day gaps, identical amounts). Groceries deliberately is not: the gaps look monthly but the amounts spread 40% around the mean, past the 15% tolerance.",
+  "ledger": {
+    "transactions": [
+      { "id": "n1", "date": "2026-06-05", "description": "Netflix", "category": "Entertainment", "amount": -50 },
+      { "id": "n2", "date": "2026-07-05", "description": "Netflix", "category": "Entertainment", "amount": -50 },
+      { "id": "n3", "date": "2026-08-05", "description": "Netflix", "category": "Entertainment", "amount": -50 },
+      { "id": "g1", "date": "2026-06-10", "description": "Groceries", "category": "Food", "amount": -200 },
+      { "id": "g2", "date": "2026-07-12", "description": "Groceries", "category": "Food", "amount": -250 },
+      { "id": "g3", "date": "2026-08-14", "description": "Groceries", "category": "Food", "amount": -300 },
+      { "id": "s1", "date": "2026-08-01", "description": "Salary", "category": "Income", "amount": 3000 }
+    ],
+    "loans": [],
+    "loanEvents": [],
+    "budgets": {},
+    "categories": ["Entertainment", "Food", "Income"]
+  },
+  "cases": [
+    { "name": "trend series covers the N months ending at the key", "fn": "trendSeries", "args": [{ "$ref": "transactions" }, "2026-08", 3], "path": "length", "expect": 3 },
+    { "fn": "trendSeries", "args": [{ "$ref": "transactions" }, "2026-08", 3], "path": "0.key", "expect": "2026-06" },
+    { "fn": "trendSeries", "args": [{ "$ref": "transactions" }, "2026-08", 3], "path": "0.Expenses", "expect": 250 },
+    { "fn": "trendSeries", "args": [{ "$ref": "transactions" }, "2026-08", 3], "path": "1.Expenses", "expect": 300 },
+    { "fn": "trendSeries", "args": [{ "$ref": "transactions" }, "2026-08", 3], "path": "-1.Expenses", "expect": 350 },
+    { "name": "net is income less expenses", "fn": "trendSeries", "args": [{ "$ref": "transactions" }, "2026-08", 3], "path": "-1.Net", "expect": 2650 },
+    { "name": "a month with only spending goes negative", "fn": "trendSeries", "args": [{ "$ref": "transactions" }, "2026-08", 3], "path": "0.Net", "expect": -250 },
+
+    { "name": "category trends order the legend by total spend", "fn": "categoryTrends", "args": [{ "$ref": "transactions" }, "2026-08", 3, 6], "path": "categories", "expect": ["Food", "Entertainment"] },
+    { "fn": "categoryTrends", "args": [{ "$ref": "transactions" }, "2026-08", 3, 6], "path": "data.0.Food", "expect": 200 },
+    { "fn": "categoryTrends", "args": [{ "$ref": "transactions" }, "2026-08", 3, 6], "path": "data.-1.Food", "expect": 300 },
+    { "fn": "categoryTrends", "args": [{ "$ref": "transactions" }, "2026-08", 3, 6], "path": "data.-1.Entertainment", "expect": 50 },
+    { "name": "the limit caps how many series are returned", "fn": "categoryTrends", "args": [{ "$ref": "transactions" }, "2026-08", 3, 1], "path": "categories", "expect": ["Food"] },
+
+    { "name": "rolling averages run over a 12-month window", "fn": "rollingAverages", "args": [{ "$ref": "transactions" }, "2026-08"], "path": "avg3", "expectClose": 300 },
+    { "name": "empty months before the data drag the longer windows down", "fn": "rollingAverages", "args": [{ "$ref": "transactions" }, "2026-08"], "path": "avg6", "expectClose": 150 },
+    { "fn": "rollingAverages", "args": [{ "$ref": "transactions" }, "2026-08"], "path": "avg12", "expectClose": 75 },
+
+    { "name": "the heatmap pads to the weekday column (2026-08-01 is a Saturday)", "fn": "dailySpend", "args": [{ "$ref": "transactions" }, "2026-08"], "path": "days.length", "expect": 36 },
+    { "fn": "dailySpend", "args": [{ "$ref": "transactions" }, "2026-08"], "path": "days.0", "expect": null },
+    { "fn": "dailySpend", "args": [{ "$ref": "transactions" }, "2026-08"], "path": "days.4", "expect": null },
+    { "name": "the first real cell is the 1st of the month", "fn": "dailySpend", "args": [{ "$ref": "transactions" }, "2026-08"], "path": "days.5", "expect": { "day": 1, "date": "2026-08-01", "amount": 0 } },
+    { "name": "income does not appear in the heatmap", "fn": "dailySpend", "args": [{ "$ref": "transactions" }, "2026-08"], "path": "days.5.amount", "expect": 0 },
+    { "fn": "dailySpend", "args": [{ "$ref": "transactions" }, "2026-08"], "path": "max", "expect": 300 },
+    { "fn": "dailySpend", "args": [{ "$ref": "transactions" }, "2026-08"], "path": "busiest", "expect": ["14", 300] },
+
+    { "name": "only the stable-amount charge is flagged recurring", "fn": "detectRecurring", "args": [{ "$ref": "transactions" }, { "$date": "2026-08-20" }], "path": "length", "expect": 1 },
+    { "fn": "detectRecurring", "args": [{ "$ref": "transactions" }, { "$date": "2026-08-20" }], "path": "0.key", "expect": "netflix" },
+    { "fn": "detectRecurring", "args": [{ "$ref": "transactions" }, { "$date": "2026-08-20" }], "path": "0.label", "expect": "Netflix" },
+    { "fn": "detectRecurring", "args": [{ "$ref": "transactions" }, { "$date": "2026-08-20" }], "path": "0.category", "expect": "Entertainment" },
+    { "fn": "detectRecurring", "args": [{ "$ref": "transactions" }, { "$date": "2026-08-20" }], "path": "0.occurrences", "expect": 3 },
+    { "fn": "detectRecurring", "args": [{ "$ref": "transactions" }, { "$date": "2026-08-20" }], "path": "0.amount", "expectClose": 50 },
+    { "fn": "detectRecurring", "args": [{ "$ref": "transactions" }, { "$date": "2026-08-20" }], "path": "0.lastDate", "expect": "2026-08-05" },
+    { "name": "groceries are rejected on amount spread, not on gaps", "fn": "detectRecurring", "args": [{ "$ref": "transactions" }, { "$date": "2026-08-20" }], "path": "[key=groceries]", "expectAbsent": true }
+  ]
+}

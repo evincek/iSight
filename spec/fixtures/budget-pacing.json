@@ -1,0 +1,46 @@
+{
+  "name": "budget burn, burn curve and forecast mid-month",
+  "description": "One month, observed on day 16 of 31. No description repeats three times, so detectRecurring finds nothing and the forecast falls back to a plain burn rate — that keeps the projected figures hand-checkable.",
+  "ledger": {
+    "transactions": [
+      { "id": "t1", "date": "2026-08-01", "description": "Salary", "category": "Income", "amount": 4000 },
+      { "id": "t2", "date": "2026-08-05", "description": "Rent", "category": "Housing", "amount": -1000 },
+      { "id": "t3", "date": "2026-08-10", "description": "Market run", "category": "Food", "amount": -300 },
+      { "id": "t4", "date": "2026-08-15", "description": "Corner shop", "category": "Food", "amount": -200 }
+    ],
+    "loans": [],
+    "loanEvents": [],
+    "budgets": { "Housing": 1000, "Food": 600, "Transport": 400 },
+    "categories": ["Housing", "Food", "Transport", "Income"]
+  },
+  "cases": [
+    { "as": "burn", "fn": "budgetBurn", "args": [{ "$ref": "transactions" }, { "$ref": "budgets" }, "2026-08", { "$date": "2026-08-16" }] },
+
+    { "name": "burn rows sort by percentage of budget used", "fn": "budgetBurn", "args": [{ "$ref": "transactions" }, { "$ref": "budgets" }, "2026-08", { "$date": "2026-08-16" }], "path": "0.category", "expect": "Housing" },
+    { "fn": "budgetBurn", "args": [{ "$ref": "transactions" }, { "$ref": "budgets" }, "2026-08", { "$date": "2026-08-16" }], "path": "1.category", "expect": "Food" },
+    { "fn": "budgetBurn", "args": [{ "$ref": "transactions" }, { "$ref": "budgets" }, "2026-08", { "$date": "2026-08-16" }], "path": "2.category", "expect": "Transport" },
+
+    { "name": "spend at exactly the budget is not yet over", "fn": "budgetBurn", "args": [{ "$ref": "transactions" }, { "$ref": "budgets" }, "2026-08", { "$date": "2026-08-16" }], "path": "[category=Housing].over", "expect": false },
+    { "name": "but it is off pace on day 16 of 31", "fn": "budgetBurn", "args": [{ "$ref": "transactions" }, { "$ref": "budgets" }, "2026-08", { "$date": "2026-08-16" }], "path": "[category=Housing].offPace", "expect": true },
+    { "name": "and projects over by month end", "fn": "budgetBurn", "args": [{ "$ref": "transactions" }, { "$ref": "budgets" }, "2026-08", { "$date": "2026-08-16" }], "path": "[category=Housing].projected", "expectClose": 1937.5 },
+
+    { "name": "two entries in one category are summed", "fn": "budgetBurn", "args": [{ "$ref": "transactions" }, { "$ref": "budgets" }, "2026-08", { "$date": "2026-08-16" }], "path": "[category=Food].spent", "expect": 500 },
+    { "fn": "budgetBurn", "args": [{ "$ref": "transactions" }, { "$ref": "budgets" }, "2026-08", { "$date": "2026-08-16" }], "path": "[category=Food].pctUsed", "expectClose": 83.33333333333334, "tolerance": 1e-9 },
+
+    { "name": "an untouched budget is neither over nor off pace", "fn": "budgetBurn", "args": [{ "$ref": "transactions" }, { "$ref": "budgets" }, "2026-08", { "$date": "2026-08-16" }], "path": "[category=Transport].offPace", "expect": false },
+    { "fn": "budgetBurn", "args": [{ "$ref": "transactions" }, { "$ref": "budgets" }, "2026-08", { "$date": "2026-08-16" }], "path": "[category=Transport].projected", "expect": 0 },
+
+    { "name": "the burn curve has one point per day of the month", "fn": "burnCurve", "args": [{ "$ref": "transactions" }, "2026-08", 2000, { "$date": "2026-08-16" }], "path": "length", "expect": 31 },
+    { "name": "cumulative actual on the observation day", "fn": "burnCurve", "args": [{ "$ref": "transactions" }, "2026-08", 2000, { "$date": "2026-08-16" }], "path": "[day=16].actual", "expect": 1500 },
+    { "name": "the actual line stops at today rather than flatlining", "fn": "burnCurve", "args": [{ "$ref": "transactions" }, "2026-08", 2000, { "$date": "2026-08-16" }], "path": "[day=17].actual", "expect": null },
+    { "name": "the pace line reaches the budget on the last day", "fn": "burnCurve", "args": [{ "$ref": "transactions" }, "2026-08", 2000, { "$date": "2026-08-16" }], "path": "-1.pace", "expectClose": 2000 },
+
+    { "name": "forecast counts expenses only", "fn": "forecast", "args": [{ "$ref": "transactions" }, "2026-08", { "$ref": "budgets" }, { "$date": "2026-08-16" }], "path": "spent", "expect": 1500 },
+    { "name": "with nothing recurring it is a plain burn rate", "fn": "forecast", "args": [{ "$ref": "transactions" }, "2026-08", { "$ref": "budgets" }, { "$date": "2026-08-16" }], "path": "basis", "expect": "burn-rate" },
+    { "name": "1500 over 16 days, extrapolated to 31", "fn": "forecast", "args": [{ "$ref": "transactions" }, "2026-08", { "$ref": "budgets" }, { "$date": "2026-08-16" }], "path": "projected", "expectClose": 2906.25 },
+    { "fn": "forecast", "args": [{ "$ref": "transactions" }, "2026-08", { "$ref": "budgets" }, { "$date": "2026-08-16" }], "path": "overBudgetBy", "expectClose": 906.25 },
+    { "name": "a finished month reports actuals, not a projection", "fn": "forecast", "args": [{ "$ref": "transactions" }, "2026-08", { "$ref": "budgets" }, { "$date": "2026-09-01" }], "path": "complete", "expect": true },
+    { "fn": "forecast", "args": [{ "$ref": "transactions" }, "2026-08", { "$ref": "budgets" }, { "$date": "2026-09-01" }], "path": "basis", "expect": "actual" },
+    { "name": "no budget means no headroom figure, not NaN", "fn": "forecast", "args": [{ "$ref": "transactions" }, "2026-08", {}, { "$date": "2026-09-01" }], "path": "overBudgetBy", "expect": null }
+  ]
+}

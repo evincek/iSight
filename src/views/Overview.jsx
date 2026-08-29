@@ -15,12 +15,14 @@ export default function Overview({ data, month, onView }) {
   const { transactions, loans, loanEvents, budgets, categories } = data;
   const plan = useMemo(() => alignBudgets(budgets, categories), [budgets, categories]);
 
-  // Transactions plus loan repayments — money out is money out. Derived once so
+  // Cost basis: transactions plus loan interest and penalties. Repaying
+  // principal isn't spending — it cancels a debt already banked — so what a
+  // month cost doesn't swing on when you happened to borrow. Derived once so
   // every figure below shares one value: a memo further down that still listed
-  // `transactions` in its deps would keep showing a stale total after a
-  // repayment was recorded on the Loans view.
+  // `transactions` in its deps would keep showing a stale total after a loan
+  // charge was recorded on the Loans view.
   const spendRows = useMemo(
-    () => A.spendingRows(transactions, loanEvents, loans),
+    () => A.costRows(transactions, loanEvents, loans),
     [transactions, loanEvents, loans]
   );
 

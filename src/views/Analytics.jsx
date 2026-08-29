@@ -269,12 +269,13 @@ export default function Analytics({ data, month }) {
   const plan = useMemo(() => alignBudgets(budgets, categories), [budgets, categories]);
 
   // The split that decides which array each panel below reads. Anything
-  // answering "what did I spend" takes `spendRows`, so loan repayments count
-  // and the figures match the Overview. Anything answering "am I on plan" —
-  // forecast, budget burn, the burn curve, recurring detection — stays on raw
-  // transactions, because a repayment has no budget line to spend against.
+  // answering "what did I spend" takes `spendRows` — the cost basis, where
+  // loan interest and penalties count and repaying principal doesn't — so the
+  // figures match the Overview. Anything answering "am I on plan against my
+  // per-category budgets" stays on raw transactions, because a loan charge has
+  // no budget line to spend against.
   const spendRows = useMemo(
-    () => A.spendingRows(transactions, loanEvents, loans),
+    () => A.costRows(transactions, loanEvents, loans),
     [transactions, loanEvents, loans]
   );
 
@@ -300,19 +301,24 @@ export default function Analytics({ data, month }) {
   // series averaged, and it's drawn as a reference line over that very chart.
   const avgs = useMemo(() => A.rollingAverages(spendRows, month), [spendRows, month]);
   const heat = useMemo(() => A.dailySpend(spendRows, month), [spendRows, month]);
+  // Strictly per-budgeted-category, so it stays on raw transactions: a loan
+  // charge has no budget line and would contribute nothing anyway.
   const burn = useMemo(() => A.budgetBurn(transactions, plan, month), [transactions, plan, month]);
-  const fc = useMemo(() => A.forecast(transactions, month, plan), [transactions, plan, month]);
+  // Cost rows, so "Spent so far" and "Projected total" agree with the
+  // comparison table below them instead of quietly measuring something else.
+  const fc = useMemo(() => A.forecast(spendRows, month, plan), [spendRows, plan, month]);
 
-  // The forecast tiles read lower than the comparison table above them in any
-  // month with a repayment, because they measure spend against plan. That's
-  // deliberate, but it looks like an error unless the tile says so.
-  const repaidThisMonth = useMemo(
+  // Interest charged this month, so the tile can say why it reads higher than
+  // the sum of the entries in the register.
+  const loanChargesThisMonth = useMemo(
     () =>
       A.inMonth(loanEvents, month)
-        .filter((e) => e.type === "repayment")
+        .filter((e) => e.type === "interest" || e.type === "penalty")
         .reduce((s, e) => s + e.amount, 0),
     [loanEvents, month]
   );
+  // Raw transactions: a one-off interest charge must not be learned as a
+  // monthly subscription.
   const recurring = useMemo(() => A.detectRecurring(transactions), [transactions]);
 
   const budgetTotal = useMemo(
@@ -320,8 +326,8 @@ export default function Analytics({ data, month }) {
     [plan]
   );
   const curve = useMemo(
-    () => A.burnCurve(transactions, month, budgetTotal),
-    [transactions, month, budgetTotal]
+    () => A.burnCurve(spendRows, month, budgetTotal),
+    [spendRows, month, budgetTotal]
   );
 
   const recurringMonthly = recurring.reduce((s, r) => s + r.amount, 0);
@@ -364,7 +370,7 @@ export default function Analytics({ data, month }) {
           label="Spent so far"
           value={fmtMoney(fc.spent)}
           size={26}
-          sub={repaidThisMonth > 0 ? "excludes loan repayments" : undefined}
+          sub={loanChargesThisMonth > 0 ? "includes loan interest, not principal" : undefined}
         />
         <StatTile
           label={fc.complete ? "Month total" : "Projected total"}
