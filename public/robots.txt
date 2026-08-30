@@ -1,0 +1,8 @@
+# Personal Ledger — https://frankbaiden.site
+#
+# Every route is either "/" (the app, hash-routed) or the static user guide,
+# so there is nothing here worth walling off.
+User-agent: *
+Allow: /
+
+Sitemap: https://frankbaiden.site/sitemap.xml
