@@ -146,6 +146,15 @@ export function applyTheme() {
 
     /* Native controls default to a light canvas; force them dark. */
     input, select, textarea, button { font-family: inherit; }
+    /* Date fields render from a shadow tree with its own metrics. WebKit
+       centres the value and gives it a line box ~2px taller than a text
+       input's, so on a phone the date reads mid-field while every control
+       beside it reads from the left edge, and the box stands proud of the
+       select next to it. Resetting the appearance drops the native box (and
+       with it the extra height); the value rule puts the text back on the
+       left. Chrome keeps its calendar button either way. */
+    input[type="date"] { -webkit-appearance: none; appearance: none; }
+    input[type="date"]::-webkit-date-and-time-value { text-align: left; margin: 0; }
     input[type="date"]::-webkit-calendar-picker-indicator {
       filter: invert(1) opacity(0.5);
       cursor: pointer;
