@@ -8,12 +8,30 @@
 | [manuals/operations.md](manuals/operations.md) | Running it locally, applying migrations, shipping a change, troubleshooting |
 | [journal/](journal/) | Dated record of what was done and why |
 
-The user guide is also built as a PDF with the screenshots included, kept at
-[`public/user-guide.pdf`](../public/user-guide.pdf) so the deployed site serves
-it. Vite copies everything in `public/` into `dist/` at build time, and the
-rewrite in [`vercel.json`](../vercel.json) puts it on `/user-guide`. It lives
-there rather than beside the markdown so there is only ever one copy of a 2.4 MB
-binary in the repository.
+## The published user guide
+
+`/user-guide` on the deployed site serves a themed HTML page built from
+`manuals/user-guide.md`. It uses the ledger's own design tokens and is written
+for a phone first, so it is not the PDF and not part of the React app.
+
+| File | Role |
+| --- | --- |
+| [`scripts/build-user-guide.mjs`](../scripts/build-user-guide.mjs) | Generates the page from the markdown. Run by hand. |
+| `public/user-guide.html` | The generated page. **Committed**, because Vercel's build image has no pandoc. |
+| `public/user-guide/*.webp` | Screenshots, resized and re-encoded for the web (572 kB, down from 2.6 MB) |
+| [`public/user-guide.pdf`](../public/user-guide.pdf) | Print copy, linked from the page footer |
+| [`vercel.json`](../vercel.json) | Rewrites `/user-guide` to the HTML and sets caching |
+
+After editing `manuals/user-guide.md`:
+
+```bash
+node scripts/build-user-guide.mjs   # needs pandoc
+npm run build                       # confirms it lands in dist/
+```
+
+Then commit the regenerated `public/user-guide.html`. It is deliberately not a
+prebuild hook: adding one would make every production deploy depend on pandoc
+being present, and it is not.
 
 Start with **user-guide.md** if you are using the app, or
 **calculations.md → The two bases** if you are working on it and a number on one

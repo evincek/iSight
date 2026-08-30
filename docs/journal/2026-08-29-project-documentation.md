@@ -310,3 +310,71 @@ stands advertises a feature that is broken in production, and the Loans
 screenshot in it shows the pre-004 state with an empty "Interest and penalties"
 tile. Applying 003 to 007 first, then retaking that screenshot, would avoid
 shipping a public document that contradicts the running app.
+
+## 2026-08-30 — Follow-up: /user-guide is now a themed HTML page
+
+The PDF was serving at `/user-guide`, and a 2880px wide print document is a
+poor thing to hand a phone. Replaced it with an HTML page carrying the ledger's
+own theme. The PDF stays available at `/user-guide.pdf` and is linked from the
+page footer.
+
+### Shape of it
+
+`scripts/build-user-guide.mjs` renders `docs/manuals/user-guide.md` into
+`public/user-guide.html`. The markdown stays the single source of truth, so the
+page cannot drift from the document the repository keeps.
+
+The page is plain HTML rather than a route in the React app. It is read by
+people who are not signed in, usually on a phone, and pulling an 850 kB bundle
+to show static prose would be the wrong trade. The app has no router either, so
+a route would have meant adding one for a single static page.
+
+Design tokens are copied from `src/theme.js` into the script rather than
+imported: the script runs on bare node with no bundler, and theme.js is a module
+of JS objects meant for React. Ten values, kept in step by hand, noted in a
+comment at both ends.
+
+It is **not** wired into `npm run build`. Vercel's build image has no pandoc, so
+a prebuild hook would fail every production deploy. The generated HTML is
+committed instead, and the build just copies it.
+
+### Images
+
+The screenshots were re-encoded to WebP for the web: 2.6 MB of PNG became
+572 kB, and every one below the fold is lazy loaded, so a phone downloads only
+what it scrolls to. The PNGs stay in `docs/manuals/images/` for GitHub and the
+PDF.
+
+The two phone captures needed more than re-encoding. They are full page scroll
+captures, 1170×5730 and 1170×6702, so an aspect ratio near 1:4.9. Constrained to
+fit a phone screen they rendered 121px and 103px wide, which is unusable. They
+are now cropped to a single screen (1170×2532, the viewport they were taken at),
+which reads as a phone rather than as a ribbon. The full length versions are
+kept as `-full.webp` and are what the tap to zoom link opens.
+
+### Mobile decisions
+
+- **Tables stack into labelled cards below 560px** rather than scrolling
+  sideways. That is the same trade the app makes on its register and comparison
+  tables, so the guide behaves like the thing it documents. Each cell carries a
+  `data-label` written by the generator, so a stacked cell still says which
+  column it came from. Above the breakpoint they are ordinary tables.
+- **Body text is 16px and every tap target is at least 44px**, which is the
+  app's own rule: anything smaller and iOS zooms the page when a control takes
+  focus.
+- Contents is a collapsible list built from the H2s, so it cannot fall out of
+  step with the document. It closes itself after a jump, or a phone is left
+  looking at the menu rather than at the section.
+- Headings carry `scroll-margin-top` so the sticky bar does not cover whatever
+  you just jumped to.
+
+Checked at 320, 360, 390, 430, 560, 768, 1024 and 1440px: no horizontal
+overflow at any width, rows stack below the breakpoint and are table rows above,
+smallest tap target 44px, all nine images resolving.
+
+### Still open
+
+The database is unchanged, so migrations 003, 004 and 007 remain unapplied and
+the guide still documents loan fields that cannot be saved. Publishing this page
+does not make that better or worse, but it is the same stale content in a nicer
+wrapper.
