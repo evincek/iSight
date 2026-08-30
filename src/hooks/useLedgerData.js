@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { supabase } from "../lib/supabaseClient";
 import { normalizeCategory, sameCategory } from "../lib/categories";
 import { setCurrency, getCurrency } from "../lib/format";
+import { retryOnClockSkew } from "../lib/retry";
 
 // The built-in default, read once at module load before anything reconfigures
 // it — so a failed or absent profile read falls back to a known symbol rather
@@ -62,65 +63,71 @@ export function useLedgerData(userId) {
   const loadAll = useCallback(async () => {
     setErrorMsg("");
     try {
-      const [txRes, loanRes, eventRes, budgetRes, catRes, profileRes] = await Promise.all([
-        supabase.from("transactions").select("*").order("date", { ascending: false }),
-        supabase.from("loans").select("*").order("date", { ascending: false }),
-        supabase.from("loan_events").select("*").order("date", { ascending: false }),
-        supabase.from("budgets").select("*"),
-        supabase.from("categories").select("*").order("created_at", { ascending: true }),
-        supabase.from("profiles").select("currency").eq("id", userId).maybeSingle(),
-      ]);
-      for (const r of [txRes, loanRes, eventRes, budgetRes, catRes]) {
-        if (r.error) throw r.error;
-      }
+      // The first load after a sign-in is the one call that can meet a token
+      // whose `iat` is a couple of seconds ahead of the data API's clock. Retry
+      // through that rather than greeting someone with a raw PostgREST error on
+      // the first screen they see. Every other error still fails on attempt one.
+      await retryOnClockSkew(async () => {
+        const [txRes, loanRes, eventRes, budgetRes, catRes, profileRes] = await Promise.all([
+          supabase.from("transactions").select("*").order("date", { ascending: false }),
+          supabase.from("loans").select("*").order("date", { ascending: false }),
+          supabase.from("loan_events").select("*").order("date", { ascending: false }),
+          supabase.from("budgets").select("*"),
+          supabase.from("categories").select("*").order("created_at", { ascending: true }),
+          supabase.from("profiles").select("currency").eq("id", userId).maybeSingle(),
+        ]);
+        for (const r of [txRes, loanRes, eventRes, budgetRes, catRes]) {
+          if (r.error) throw r.error;
+        }
 
-      // `profiles` is deliberately not in that list. Migrations are applied by
-      // hand in the Supabase editor, so this code can reach a database where
-      // 007 has not run yet — and a missing display preference must not stop
-      // someone opening their ledger. Anything unreadable here falls back to
-      // the default symbol and the rest of the load carries on.
-      let symbol = profileRes.error ? null : profileRes.data?.currency;
-      if (!profileRes.error && !symbol) {
-        // No row: this account signed up after 007's backfill ran. Seed it the
-        // same way default categories are seeded, ignoring a row another tab
-        // inserted first. A failure here is equally non-fatal.
-        await supabase
-          .from("profiles")
-          .upsert({ id: userId }, { onConflict: "id", ignoreDuplicates: true });
-      }
-      // The module-level symbol is what the ~76 formatting call sites read; the
-      // state copy is what makes React re-render when it changes.
-      setCurrency(symbol || DEFAULT_SYMBOL);
-      setCurrencyState(symbol || DEFAULT_SYMBOL);
+        // `profiles` is deliberately not in that list. Migrations are applied by
+        // hand in the Supabase editor, so this code can reach a database where
+        // 007 has not run yet — and a missing display preference must not stop
+        // someone opening their ledger. Anything unreadable here falls back to
+        // the default symbol and the rest of the load carries on.
+        let symbol = profileRes.error ? null : profileRes.data?.currency;
+        if (!profileRes.error && !symbol) {
+          // No row: this account signed up after 007's backfill ran. Seed it the
+          // same way default categories are seeded, ignoring a row another tab
+          // inserted first. A failure here is equally non-fatal.
+          await supabase
+            .from("profiles")
+            .upsert({ id: userId }, { onConflict: "id", ignoreDuplicates: true });
+        }
+        // The module-level symbol is what the ~76 formatting call sites read; the
+        // state copy is what makes React re-render when it changes.
+        setCurrency(symbol || DEFAULT_SYMBOL);
+        setCurrencyState(symbol || DEFAULT_SYMBOL);
 
-      setTransactions(txRes.data.map((t) => ({ ...t, amount: Number(t.amount) })));
-      setLoans(loanRes.data.map(shapeLoan));
-      setLoanEvents(eventRes.data.map(shapeEvent));
+        setTransactions(txRes.data.map((t) => ({ ...t, amount: Number(t.amount) })));
+        setLoans(loanRes.data.map(shapeLoan));
+        setLoanEvents(eventRes.data.map(shapeEvent));
 
-      const budgetMap = {};
-      budgetRes.data.forEach((b) => (budgetMap[b.category] = Number(b.amount)));
-      setBudgets(budgetMap);
+        const budgetMap = {};
+        budgetRes.data.forEach((b) => (budgetMap[b.category] = Number(b.amount)));
+        setBudgets(budgetMap);
 
-      let catNames = catRes.data.map((c) => c.name);
-      if (catNames.length === 0) {
-        // First run for this user: seed default categories. Two loads can race
-        // here — StrictMode runs the effect twice, and a second tab seeds in
-        // parallel — so ignore rows another writer already inserted rather than
-        // letting a duplicate-key error abort the load and leave the list empty.
-        const seedRows = DEFAULT_CATEGORIES.map((name) => ({ user_id: userId, name }));
-        const { error } = await supabase
-          .from("categories")
-          .upsert(seedRows, { onConflict: "user_id,name", ignoreDuplicates: true });
-        if (error) throw error;
-        // Skipped rows come back empty, so re-read to get whatever actually landed.
-        const { data: seeded, error: rereadErr } = await supabase
-          .from("categories")
-          .select("*")
-          .order("created_at", { ascending: true });
-        if (rereadErr) throw rereadErr;
-        catNames = seeded.map((c) => c.name);
-      }
-      setCategories(catNames);
+        let catNames = catRes.data.map((c) => c.name);
+        if (catNames.length === 0) {
+          // First run for this user: seed default categories. Two loads can race
+          // here — StrictMode runs the effect twice, and a second tab seeds in
+          // parallel — so ignore rows another writer already inserted rather than
+          // letting a duplicate-key error abort the load and leave the list empty.
+          const seedRows = DEFAULT_CATEGORIES.map((name) => ({ user_id: userId, name }));
+          const { error } = await supabase
+            .from("categories")
+            .upsert(seedRows, { onConflict: "user_id,name", ignoreDuplicates: true });
+          if (error) throw error;
+          // Skipped rows come back empty, so re-read to get whatever actually landed.
+          const { data: seeded, error: rereadErr } = await supabase
+            .from("categories")
+            .select("*")
+            .order("created_at", { ascending: true });
+          if (rereadErr) throw rereadErr;
+          catNames = seeded.map((c) => c.name);
+        }
+        setCategories(catNames);
+      });
     } catch (err) {
       setErrorMsg(err.message || "Couldn't load your data.");
     } finally {

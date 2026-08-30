@@ -2,6 +2,7 @@ import React, { useState, useMemo } from "react";
 import { tokens, display, body } from "./theme";
 import { todayISO, monthKey, monthOptions } from "./lib/format";
 import { useLedgerData } from "./hooks/useLedgerData";
+import { useSessionGuard } from "./hooks/useSessionGuard";
 import Shell from "./components/Shell";
 import { Banner } from "./components/primitives";
 import Overview from "./views/Overview";
@@ -30,6 +31,8 @@ function Splash({ children }) {
 
 export default function Ledger({ session }) {
   const data = useLedgerData(session.user.id);
+  // One active session per account: signing in elsewhere signs this device out.
+  useSessionGuard(session);
   const [view, setView] = useState("overview");
   const [selectedMonth, setSelectedMonth] = useState(todayISO().slice(0, 7));
 
