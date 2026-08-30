@@ -1,6 +1,7 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { tokens, font, display, label as labelStyle, body } from "../theme";
 import { supabase } from "../lib/supabaseClient";
+import { EVICTED_KEY } from "../hooks/useSessionGuard";
 import { Field, Input, Button, Banner } from "../components/primitives";
 import { Logo } from "../components/Logo";
 
@@ -58,6 +59,24 @@ export default function AuthView({ onForgot }) {
   const [password, setPassword] = useState("");
   const [msg, setMsg] = useState({ tone: null, text: "" });
   const [loading, setLoading] = useState(false);
+
+  // useSessionGuard drops a flag here just before it signs a displaced device
+  // out. Read and clear it once, so the person understands why they are looking
+  // at the login screen instead of their ledger — and so a later reload of this
+  // same screen doesn't show a stale explanation.
+  useEffect(() => {
+    try {
+      if (sessionStorage.getItem(EVICTED_KEY)) {
+        sessionStorage.removeItem(EVICTED_KEY);
+        setMsg({
+          tone: "bad",
+          text: "Signed out — your account was signed in on another device.",
+        });
+      }
+    } catch {
+      // Storage refused; there is simply no notice to show.
+    }
+  }, []);
 
   const submit = async (e) => {
     e.preventDefault();

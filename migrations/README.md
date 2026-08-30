@@ -12,6 +12,7 @@ Run these **in numerical order** in the Supabase SQL editor
 | `005_merge_category_case.sql` | Folds existing case-variant categories together (plan first, then apply) |
 | `006_category_case.sql` | Case-insensitive unique category names per user |
 | `007_profiles.sql` | Per-user settings row; holds the display currency |
+| `008_active_sessions.sql` | One-active-session table; newest login wins |
 
 ## The rules
 
