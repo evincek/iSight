@@ -4,6 +4,7 @@ import { monthLabel } from "../lib/format";
 import { supabase } from "../lib/supabaseClient";
 import { useIsNarrow } from "../hooks/useIsNarrow";
 import { Button } from "./primitives";
+import { Logo } from "./Logo";
 
 // Re-exported so existing importers keep working; the hook itself now lives
 // in hooks/ so views can use it without importing their own container.
@@ -280,10 +281,13 @@ export default function Shell({
           }}
         >
           <div style={{ padding: "22px 16px 18px", borderBottom: `1px solid ${tokens.line}` }}>
-            <div style={{ ...display(22, tokens.volt), lineHeight: 0.9 }}>
-              PERSONAL
-              <br />
-              LEDGER
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <Logo height={42} />
+              <div style={{ ...display(22, tokens.volt), lineHeight: 0.9 }}>
+                PERSONAL
+                <br />
+                LEDGER
+              </div>
             </div>
           </div>
 
@@ -348,8 +352,11 @@ export default function Shell({
         {narrow && (
           <div style={{ display: "grid", gap: 12, marginBottom: 18 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
-              <div style={{ ...display(20, tokens.volt), lineHeight: 0.9, minWidth: 0 }}>
-                PERSONAL LEDGER
+              <div style={{ display: "flex", alignItems: "center", gap: 9, minWidth: 0 }}>
+                <Logo height={26} />
+                <div style={{ ...display(20, tokens.volt), lineHeight: 0.9, minWidth: 0 }}>
+                  PERSONAL LEDGER
+                </div>
               </div>
               <button
                 onClick={() => supabase.auth.signOut()}

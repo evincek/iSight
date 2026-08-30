@@ -147,15 +147,61 @@ html = html.replace(/<table>([\s\S]*?)<\/table>/g, (whole, inner) => {
  * one opens full size when tapped. */
 html = html.replace(/<figure>\s*(<img[^>]*>)/g, (m, img) => `<figure>${linkify(img)}`);
 
+// Absolute origin. Canonical/OG URLs must be absolute — crawlers do not resolve
+// relative ones — so the host lives here rather than being inlined four times.
+const SITE = "https://frankbaiden.site";
+
+// The Personal Ledger mark, inlined so the bar paints with the page instead of
+// waiting on a second request. Geometry is verbatim from the master artwork in
+// assets/per-ledger.svg; see src/components/Logo.jsx and assets/README.md for
+// the transforms and why the draw order (P, dot, then the green stem over it)
+// must not change.
+const MARK = `<svg class="mark" viewBox="638 553 724 894" aria-hidden="true" focusable="false">
+  <path transform="matrix(1.903439,0,0,1.903439,-433.764071,-834.916331)" fill="${t.chalk}" fill-rule="evenodd" d="M664.916,971.917L776.583,971.917C812.694,971.917 843.805,961.64 869.916,941.084C896.027,920.528 909.083,895.806 909.083,866.917C909.083,838.584 897.277,814.278 873.666,794.001C850.055,773.723 821.86,763.584 789.083,763.584L664.916,763.584L664.916,971.917ZM664.916,1006.084L664.916,1164.417L779.916,1164.417C795.472,1164.417 803.249,1169.973 803.249,1181.084C803.249,1192.751 795.472,1198.584 779.916,1198.584L585.749,1198.584C570.749,1198.584 563.249,1192.751 563.249,1181.084C563.249,1169.973 570.749,1164.417 585.749,1164.417L630.749,1164.417L630.749,763.584L585.749,763.584C570.749,763.584 563.249,757.751 563.249,746.084C563.249,734.973 570.749,729.417 585.749,729.417L785.749,729.417C830.194,729.417 867.555,742.612 897.833,769.001C928.11,795.39 943.249,828.028 943.249,866.917C943.249,905.806 926.86,938.723 894.083,965.667C861.305,992.612 821.305,1006.084 774.083,1006.084L664.916,1006.084Z"/>
+  <ellipse transform="matrix(0.400317,0,0,0.37363,605.440051,877.403927)" cx="1542.526" cy="1435.567" rx="81.186" ry="87.629" fill="#88CF3C"/>
+  <rect transform="matrix(1.029846,0,0,0.921455,-24.923076,108.473602)" x="768.041" y="553.485" width="67.01" height="827.549" fill="#88CF3C"/>
+</svg>`;
+
 const page = `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="${t.void}">
-<meta name="description" content="How to use Personal Ledger: logging entries, budgets, loans, and reading the figures.">
+<meta name="description" content="How to use Personal Ledger: logging income and expenses, setting monthly budgets, tracking loans, and reading the analytics.">
 <meta name="color-scheme" content="dark">
-<title>User guide · Personal Ledger</title>
+<title>User Guide · Personal Ledger</title>
+<link rel="canonical" href="${SITE}/user-guide">
+<meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Personal Ledger">
+<meta property="og:title" content="User Guide · Personal Ledger">
+<meta property="og:description" content="How to use Personal Ledger: logging income and expenses, setting monthly budgets, tracking loans, and reading the analytics.">
+<meta property="og:url" content="${SITE}/user-guide">
+<meta property="og:image" content="${SITE}/og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="en_US">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="User Guide · Personal Ledger">
+<meta name="twitter:description" content="How to use Personal Ledger: logging income and expenses, setting monthly budgets, tracking loans, and reading the analytics.">
+<meta name="twitter:image" content="${SITE}/og-image.png">
+<link rel="icon" href="/favicon.ico" sizes="48x48">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/site.webmanifest">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "TechArticle",
+  "headline": "Personal Ledger user guide",
+  "description": "How to use Personal Ledger: logging income and expenses, setting monthly budgets, tracking loans, and reading the analytics.",
+  "url": "${SITE}/user-guide",
+  "inLanguage": "en",
+  "image": "${SITE}/og-image.png",
+  "about": { "@type": "WebApplication", "name": "Personal Ledger", "url": "${SITE}/" }
+}
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Anton&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
@@ -189,7 +235,9 @@ body {
   font-family: var(--display); color: var(--volt);
   font-size: 15px; line-height: .95; letter-spacing: .01em; text-transform: uppercase;
 }
-.wordmark a { color: inherit; text-decoration: none; }
+.wordmark a { color: inherit; text-decoration: none; display: flex; align-items: center; gap: 9px; }
+/* Height-driven so the mark tracks the two lines of type beside it. */
+.wordmark .mark { height: 30px; width: auto; display: block; flex: none; }
 .bar button {
   font-family: var(--body); font-size: 16px; font-weight: 700;
   letter-spacing: .1em; text-transform: uppercase;
@@ -330,7 +378,7 @@ html { scroll-behavior: smooth; }
 </head>
 <body>
 <div class="bar">
-  <div class="wordmark"><a href="/">Personal<br>Ledger</a></div>
+  <div class="wordmark"><a href="/">${MARK}<span>Personal<br>Ledger</span></a></div>
   <button id="tocBtn" aria-expanded="false" aria-controls="toc">Contents</button>
 </div>
 <nav id="toc" hidden aria-label="Contents">

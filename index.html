@@ -9,14 +9,92 @@
       content="width=device-width, initial-scale=1.0, viewport-fit=cover"
     />
     <meta name="theme-color" content="#0A0A0A" />
-    <meta name="description" content="Personal Ledger — track income, expenses, budgets and loans." />
-    <title>Personal Ledger</title>
+    <meta name="color-scheme" content="dark" />
+
+    <title>Personal Ledger — Track Income, Expenses, Budgets &amp; Loans</title>
+    <meta
+      name="description"
+      content="Personal Ledger is a free, private finance tracker: log income and expenses, set monthly budgets, follow loans, and see where your money actually goes."
+    />
+    <!-- Both hosts serve this app, so every page states the apex as canonical.
+         Without it Google treats www and non-www as two competing duplicates. -->
+    <link rel="canonical" href="https://frankbaiden.site/" />
+    <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1" />
+    <meta name="author" content="Godfred Frank Baiden" />
+
+    <!-- Open Graph / Twitter. og:image must be an absolute URL — crawlers do not
+         resolve relative paths, and a relative one silently yields no preview. -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Personal Ledger" />
+    <meta property="og:title" content="Personal Ledger — Track Income, Expenses, Budgets &amp; Loans" />
+    <meta
+      property="og:description"
+      content="A free, private finance tracker: log income and expenses, set monthly budgets, follow loans, and see where your money actually goes."
+    />
+    <meta property="og:url" content="https://frankbaiden.site/" />
+    <meta property="og:image" content="https://frankbaiden.site/og-image.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Personal Ledger — income, expenses, budgets and loans in one private ledger." />
+    <meta property="og:locale" content="en_US" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Personal Ledger — Track Income, Expenses, Budgets &amp; Loans" />
+    <meta
+      name="twitter:description"
+      content="A free, private finance tracker: log income and expenses, set monthly budgets, follow loans, and see where your money actually goes."
+    />
+    <meta name="twitter:image" content="https://frankbaiden.site/og-image.png" />
+
+    <link rel="icon" href="/favicon.ico" sizes="48x48" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/site.webmanifest" />
+
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
       rel="stylesheet"
       href="https://fonts.googleapis.com/css2?family=Anton&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
     />
+
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@graph": [
+          {
+            "@type": "WebSite",
+            "@id": "https://frankbaiden.site/#website",
+            "url": "https://frankbaiden.site/",
+            "name": "Personal Ledger",
+            "description": "A free, private personal finance tracker for income, expenses, budgets and loans.",
+            "inLanguage": "en"
+          },
+          {
+            "@type": "WebApplication",
+            "@id": "https://frankbaiden.site/#app",
+            "name": "Personal Ledger",
+            "url": "https://frankbaiden.site/",
+            "applicationCategory": "FinanceApplication",
+            "operatingSystem": "Any (web browser)",
+            "browserRequirements": "Requires JavaScript",
+            "description": "Log income and expenses, set monthly budgets, track loans, and read monthly analytics that show where your money actually went.",
+            "featureList": [
+              "Income and expense register",
+              "Monthly budgets with over/under tracking",
+              "Loan tracking",
+              "Monthly analytics and category breakdowns"
+            ],
+            "isPartOf": { "@id": "https://frankbaiden.site/#website" },
+            "offers": {
+              "@type": "Offer",
+              "price": "0",
+              "priceCurrency": "USD"
+            }
+          }
+        ]
+      }
+    </script>
+
     <style>
       /* Painted before JS runs so there's no white flash on load.
          The full token set is installed by applyTheme() in theme.js. */
@@ -27,10 +105,32 @@
         /* Stop iOS from inflating type when the phone is turned sideways. */
         -webkit-text-size-adjust: 100%;
       }
+      /* Only ever seen by no-JS crawlers and readers; mirrors what the app is,
+         so it is a fallback rather than cloaked keyword bait. */
+      .noscript {
+        max-width: 34rem; margin: 0 auto; padding: 12vh 24px;
+        font-family: Inter, system-ui, sans-serif; line-height: 1.6;
+      }
+      .noscript h1 { font-size: 1.6rem; margin: 0 0 .6em; }
+      .noscript a { color: #E8FF4D; }
     </style>
   </head>
   <body>
     <div id="root"></div>
+    <noscript>
+      <div class="noscript">
+        <h1>Personal Ledger</h1>
+        <p>
+          Personal Ledger is a free, private personal finance tracker. Log income
+          and expenses, set monthly budgets, keep track of loans, and read monthly
+          analytics that show where your money actually went.
+        </p>
+        <p>
+          The app needs JavaScript to run. In the meantime you can read the
+          <a href="/user-guide">user guide</a>, which explains every screen.
+        </p>
+      </div>
+    </noscript>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>

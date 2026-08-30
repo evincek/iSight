@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { tokens, font, display, label as labelStyle, body } from "../theme";
 import { supabase } from "../lib/supabaseClient";
 import { Field, Input, Button, Banner } from "../components/primitives";
+import { Logo } from "../components/Logo";
 
 /** Shared chrome for every signed-out screen. */
 export function AuthFrame({ heading, children, footer }) {
@@ -18,10 +19,13 @@ export function AuthFrame({ heading, children, footer }) {
       }}
     >
       <div style={{ width: "100%", maxWidth: 400 }}>
-        <div style={{ ...display(30, tokens.volt), lineHeight: 0.9, marginBottom: 20 }}>
-          PERSONAL
-          <br />
-          LEDGER
+        <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 20 }}>
+          <Logo height={58} title="Personal Ledger" />
+          <div style={{ ...display(30, tokens.volt), lineHeight: 0.9 }}>
+            PERSONAL
+            <br />
+            LEDGER
+          </div>
         </div>
         <div style={{ border: `1px solid ${tokens.line}`, background: tokens.panel }}>
           <div style={{ padding: "18px 20px", borderBottom: `1px solid ${tokens.line}` }}>

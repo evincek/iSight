@@ -1,5 +1,13 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "redirects": [
+    {
+      "source": "/(.*)",
+      "has": [{ "type": "host", "value": "www.frankbaiden.site" }],
+      "destination": "https://frankbaiden.site/$1",
+      "permanent": true
+    }
+  ],
   "rewrites": [
     { "source": "/user-guide", "destination": "/user-guide.html" }
   ],
@@ -14,13 +22,26 @@
       "source": "/user-guide.pdf",
       "headers": [
         { "key": "Content-Disposition", "value": "inline; filename=\"personal-ledger-user-guide.pdf\"" },
-        { "key": "Cache-Control", "value": "public, max-age=0, s-maxage=3600, stale-while-revalidate=86400" }
+        { "key": "Cache-Control", "value": "public, max-age=0, s-maxage=3600, stale-while-revalidate=86400" },
+        { "key": "X-Robots-Tag", "value": "noindex, follow" }
       ]
     },
     {
       "source": "/user-guide/(.*)",
       "headers": [
         { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
+      ]
+    },
+    {
+      "source": "/(robots.txt|sitemap.xml)",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=0, s-maxage=3600, stale-while-revalidate=86400" }
+      ]
+    },
+    {
+      "source": "/(favicon.ico|favicon.svg|apple-touch-icon.png|icon-192.png|icon-512.png|og-image.png|site.webmanifest)",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=0, s-maxage=604800, stale-while-revalidate=604800" }
       ]
     }
   ]
